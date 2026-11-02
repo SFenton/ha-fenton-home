@@ -50,6 +50,32 @@ the `fenton_live_activity_*` events. The integration owns no entities.
 - App: sign-out unregisters before revoking the login and forgets the Keychain registration. A failed call stores
   `{server, webhook}` and retries the deferred route on next launch or network change. Re-login registers fresh
   (a 410 on a stale webhook already re-registers).
+- Check first: deleted registration `device_tracker.stephen_s_iphone_fenton_2` (webhook 4D77…, removed 2026-11-02) kept
+  sending fixes until the 16:28Z restart, although `devicectl` showed no `com.sfenton.home.uikit` app on the Duo.
+  Find which install held it before trusting "a deleted registration stays deleted".
 - Later, behind a dry-run option: sweep abandoned S+H registrations (no push details and 14 days without an update, or
   superseded by the same user's newer registration of the same model and 7 days without an update). Never touches
   other apps' registrations; every removal is logged.
+
+## 1.2 (with or right after 1.1): presence auto-enrolment
+
+Owner request, 2026-11-02. Full brief: Fenton-HASS-Native `build/handoff/presence-fenton-home-brief.md`; background
+`build/handoff/presence-composite.md`.
+
+- Why: Stephen carries a Duo or an 18 Pro. The person followed whichever tracker reported last, so the phone left at
+  home flipped the house Away → Home about 30 times a day. Live fix today: `ha-composite-tracker` 4.3.0, package
+  `/config/packages/presence_composite.yaml` (`require_movement: true`), and each person tracks only its composite.
+- Gap: mobile_app adds a new registration's tracker straight to its user's person, which bypasses the composite.
+- `presence/` part, its own on/off option:
+  1. On startup and on any mobile_app tracker create or remove, map registration → `entry.data["user_id"]` → person
+     (the ownership lookup 1.1 adds).
+  2. Keep that person's composite inputs equal to all the user's mobile_app trackers (Companion ones included) minus an
+     exclude list, seeded with `device_tracker.iphone_18_pro` and `device_tracker.ipad`.
+  3. Keep the person bound only to its composite; undo mobile_app's auto-add.
+  4. A registration removed by 1.1's sign-out drops out of the composite through the same path.
+  5. `composite` in `after_dependencies`; missing → presence off with a Repairs issue.
+  6. No writes when nothing differs; each change logged at info.
+  7. One source of truth: move both composites from YAML to Composite config entries and own their options in code
+     (read `composite/config_flow.py` and `__init__.py` for how a YAML import overwrites options); retire the package.
+- Done: a dry run shows no change today; a test adds a tracker to a person and sees it moved into the composite;
+  memory `presence-composite-trackers` and the package header updated or the file removed; ask before any HA restart.
