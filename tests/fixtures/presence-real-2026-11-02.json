@@ -1,0 +1,92 @@
+{
+  "captured": "2026-11-02T20:06Z",
+  "source": "HA 2026.10.4 websocket (read only): config/entity_registry/list, config_entries/get, person/list, get_states",
+  "note": "mobile_app registration user_id is not exposed by any read-only API; owners here are inferred (see user_source).",
+  "mobile_app": [
+    {
+      "entity_id": "device_tracker.stephen_s_iphone_fenton",
+      "config_entry_id": "01M67K3XQMD6CFFQJ32F3ZFF6P",
+      "title": "Stephen's iPhone \u00b7 Fenton",
+      "user_id": "user-stephen",
+      "user_source": "inferred",
+      "last_updated": "2026-11-02T20:06:07.668107+00:00"
+    },
+    {
+      "entity_id": "device_tracker.iphone_fenton",
+      "config_entry_id": "01M4YRVEM5A906DMFHSC19YV1H",
+      "title": "iPhone \u00b7 Fenton",
+      "user_id": "user-stephen",
+      "user_source": "inferred",
+      "last_updated": "2026-11-02T20:03:44.921338+00:00"
+    },
+    {
+      "entity_id": "device_tracker.stephanies_iphone",
+      "config_entry_id": "01K7WRFMP7ZNKRSWQPDAXYK0XQ",
+      "title": "Stephanie\u2019s iPhone",
+      "user_id": "user-stephanie",
+      "user_source": "inferred",
+      "last_updated": "2026-11-02T19:52:39.303368+00:00"
+    },
+    {
+      "entity_id": "device_tracker.iphone_18_pro",
+      "config_entry_id": "01M307Y92BKEC0XG682EG0Y0PF",
+      "title": "iPhone 18 Pro",
+      "user_id": "user-stephen",
+      "user_source": "inferred",
+      "last_updated": "2026-11-02T19:52:39.317855+00:00"
+    },
+    {
+      "entity_id": "device_tracker.ipad",
+      "config_entry_id": "01KSERVEJCKAS3K5Q4PZ9W8WQ5",
+      "title": "iPad",
+      "user_id": "user-stephen",
+      "user_source": "inferred",
+      "last_updated": "2026-11-02T19:52:39.313878+00:00"
+    },
+    {
+      "entity_id": "device_tracker.iphone_17_pro",
+      "config_entry_id": "01K7MRNWZ39QSNV4M86SJZ9JAP",
+      "title": "iPhone 13 Pro (6)",
+      "user_id": "UNKNOWN",
+      "user_source": "unknown",
+      "last_updated": "2026-11-02T19:52:39.287754+00:00"
+    }
+  ],
+  "composites": [
+    {
+      "entity_id": "device_tracker.stephen_location",
+      "config_entry_id": "01M6ERA5Y37H4X2JVYYQ7XPZ0N",
+      "source": "import",
+      "inputs": [
+        "device_tracker.stephen_s_iphone_fenton",
+        "device_tracker.iphone_fenton"
+      ]
+    },
+    {
+      "entity_id": "device_tracker.stephanie_location",
+      "config_entry_id": "01M6ERA5Y3D6RSG5KHSFGBW9KR",
+      "source": "import",
+      "inputs": [
+        "device_tracker.stephanies_iphone"
+      ]
+    }
+  ],
+  "persons": [
+    {
+      "id": "stephen_fenton",
+      "name": "Stephen Fenton",
+      "user_id": "user-stephen",
+      "device_trackers": [
+        "device_tracker.stephen_location"
+      ]
+    },
+    {
+      "id": "stephanie_hobart",
+      "name": "Stephanie Hobart",
+      "user_id": "user-stephanie",
+      "device_trackers": [
+        "device_tracker.stephanie_location"
+      ]
+    }
+  ]
+}

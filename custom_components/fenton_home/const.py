@@ -17,6 +17,14 @@ CONF_LIVE_JOBS_ENABLED = "live_jobs_enabled"
 CONF_LIVE_JOBS = "live_jobs"
 CONF_LIVE_DEVICES = "live_devices"
 CONF_PERSON_NOTIFY = "person_notify"
+#: Abandoned-registration sweep (``sweep.py``): ``off``, ``dry_run`` (log and list, remove nothing) or ``on``.
+CONF_SWEEP_MODE = "sweep_mode"
+SWEEP_OFF, SWEEP_DRY_RUN, SWEEP_ON = "off", "dry_run", "on"
+SWEEP_MODES = (SWEEP_OFF, SWEEP_DRY_RUN, SWEEP_ON)
+DEFAULT_SWEEP_MODE = SWEEP_DRY_RUN
+#: Days without an update before a registration may be swept: no push details / superseded by a newer same-model one.
+SWEEP_DAYS_NO_PUSH = 14
+SWEEP_DAYS_SUPERSEDED = 7
 
 DEFAULT_BUNDLE_ID = "com.sfenton.home"
 
@@ -35,6 +43,9 @@ DAILY_LIMIT = 1000
 
 API_CONFIG = "/api/fenton_home/config"
 API_PUSH = "/api/fenton_home/apns"
+API_UNREGISTER = "/api/fenton_home/devices/unregister"
+#: Unauthenticated unregister calls allowed per client address per minute.
+UNREGISTER_PER_MINUTE = 10
 
 #: The names this integration had before 1.0 (Fenton Home Push). The paths and the problem service stay as aliases
 #: while registrations and automations move; the config entry and the store are imported once (``legacy.py``).
@@ -55,3 +66,14 @@ EVENT_ACTION = "fenton_live_activity_action"
 EVENT_DISMISSED = "fenton_live_activity_dismissed"
 SENSOR_JOBS = "sensor.fenton_live_jobs"
 ISSUE_LEGACY_STILL_INSTALLED = "legacy_still_installed"
+ISSUE_SWEEP_CANDIDATES = "sweep_candidates"
+
+#: Presence auto-enrolment (``presence.py``): the master switch (off until the owner turns it on), dry run (log what
+#: would change, change nothing; on by default) and the trackers kept out of every composite.
+CONF_PRESENCE_ENABLED = "presence_enabled"
+CONF_PRESENCE_DRY_RUN = "presence_dry_run"
+CONF_PRESENCE_EXCLUDE = "presence_exclude"
+DEFAULT_PRESENCE_EXCLUDE = ["device_tracker.iphone_18_pro", "device_tracker.iphone_17_pro", "device_tracker.ipad"]
+ISSUE_PRESENCE_COMPOSITE_MISSING = "presence_composite_missing"
+ISSUE_PRESENCE_NO_COMPOSITE = "presence_no_composite"
+ISSUE_PRESENCE_COMPOSITE_YAML = "presence_composite_yaml"

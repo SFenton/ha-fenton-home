@@ -135,6 +135,11 @@ class Timestamps:
         self._last[key] = stamp
         return stamp
 
+    def forget_prefix(self, prefix: str) -> None:
+        """Drop the counters of a removed device (keys are ``<webhook>:<tag>``)."""
+        for key in [k for k in self._last if k.startswith(prefix)]:
+            del self._last[key]
+
 
 def build(body: dict[str, Any], *, critical_enabled: bool, now: float | None = None,
           timestamps: Timestamps | None = None, ts_key: str | None = None) -> ApnsRequest:

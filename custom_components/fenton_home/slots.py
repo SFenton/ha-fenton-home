@@ -11,6 +11,8 @@ The engine keeps four for jobs and one for a problem:
 
 from __future__ import annotations
 
+from typing import Any
+
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 
@@ -93,6 +95,11 @@ class Coalescer:
 
     def forget(self, key: object) -> None:
         self._last.pop(key, None)
+
+    def forget_where(self, match: Any) -> None:
+        """Forget every key ``match(key)`` is true for (a removed device's)."""
+        for key in [k for k in self._last if match(k)]:
+            del self._last[key]
 
     def last(self, key: object) -> float | None:
         return self._last.get(key)

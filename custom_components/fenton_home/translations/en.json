@@ -39,7 +39,11 @@
           "live_jobs_enabled": "Show job cards",
           "live_jobs": "Jobs that get a card",
           "live_devices": "Devices that get cards",
-          "person_notify": "Notify action for people without S+H"
+          "person_notify": "Notify action for people without S+H",
+          "sweep_mode": "Sweep abandoned registrations",
+          "presence_enabled": "Presence auto-enrolment",
+          "presence_dry_run": "Presence dry run",
+          "presence_exclude": "Trackers kept out of presence"
         },
         "data_description": {
           "critical_alerts": "Turn on only after Apple grants the app the Critical Alerts entitlement. Until then, critical notifications arrive as time-sensitive.",
@@ -47,7 +51,11 @@
           "live_jobs_enabled": "Turn off to stop all Live Activity cards. Problems then go to everyone as ordinary notifications.",
           "live_jobs": "Each job runs as its own Live Activity.",
           "live_devices": "Leave empty for every device with Live Activities allowed.",
-          "person_notify": "The notify action that reaches a person's whole phone. Use * for their first name: *_s_phone is notify.stephen_s_phone for Stephen."
+          "person_notify": "The notify action that reaches a person's whole phone. Use * for their first name: *_s_phone is notify.stephen_s_phone for Stephen.",
+          "sweep_mode": "Finds S+H registrations left behind by a reinstall or a sign-out (no push details and 14 days without an update, or replaced by a newer one of the same model and 7 days without an update). Dry run lists them in Repairs and the log and removes nothing.",
+          "presence_enabled": "Keeps each person's Composite tracker equal to all of their phones and tablets, and keeps the phones off the person itself. Needs the Composite integration (HACS). Off until you turn it on.",
+          "presence_dry_run": "On: only log (and show in the log) what presence would change. Turn off to let it change the Composite trackers and people.",
+          "presence_exclude": "Trackers presence never puts in a composite, such as a stale or retired device."
         }
       }
     }
@@ -108,6 +116,31 @@
     "legacy_still_installed": {
       "title": "Remove Fenton Home Push in HACS and restart",
       "description": "The old Fenton Home Push integration (fenton_push) is still installed and running, so its settings can't be imported safely. Remove it in HACS and restart Home Assistant; S+H Home Integration then imports its key and options."
+    },
+    "sweep_candidates": {
+      "title": "Abandoned S+H registrations found",
+      "description": "The sweep would remove {count} S+H registration(s): {devices}. Nothing was removed. Set the sweep to On in the integration's options to remove them, or Off to stop this check."
+    },
+    "presence_composite_missing": {
+      "title": "Presence needs the Composite integration",
+      "description": "Presence auto-enrolment is on but the Composite integration (pnbruckner/ha-composite-tracker, HACS) isn't installed, so presence does nothing. Install it, restart Home Assistant, or turn presence off in this integration's options."
+    },
+    "presence_no_composite": {
+      "title": "{person} has no Composite tracker",
+      "description": "Presence left {person} alone: none of their trackers is a Composite tracker. Create a Composite tracker for them (Settings, Devices & services, Composite, Add) and set it as their only tracker."
+    },
+    "presence_composite_yaml": {
+      "title": "Move the Composite trackers out of YAML",
+      "description": "Presence wants to change {trackers}, but it is defined in YAML, which replaces any change on the next reload or restart. Presence changed nothing. Move it to a Composite entry in the UI (see the README, Presence)."
+    }
+  },
+  "selector": {
+    "sweep_mode": {
+      "options": {
+        "off": "Off",
+        "dry_run": "Dry run (list only)",
+        "on": "On (remove them)"
+      }
     }
   }
 }

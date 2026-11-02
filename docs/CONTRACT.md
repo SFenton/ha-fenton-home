@@ -12,6 +12,8 @@ registration has moved (and when something still calls `fenton_push.problem`). A
 config path should ask the old one. The notify action `notify.fenton_<person>` and the `fenton_live_activity_*`
 events are unchanged.
 
+**v2.1 (integration 1.1.0)** adds `POST /api/fenton_home/devices/unregister` (section 2a). Nothing existing changes.
+
 ## 1. Ask the integration where to point pushes
 
 `GET /api/fenton_home/config` (Home Assistant access token) →
@@ -62,6 +64,32 @@ push only) and adds them on a later `update_registration`. Until the app connect
 - **Sign-out:** before revoking the refresh token, send `update_registration` with
   `"app_data": {}`. That drops push for this device, so the person's targets stop reaching it at once.
   Signing back in as the same user restores `app_data`.
+
+### 2a. Unregister (sign-out, and its retry)
+
+`POST /api/fenton_home/devices/unregister`, JSON body `{"webhook_id": "<id>"}`. The Home Assistant login is optional:
+send the bearer token when you still have it, and omit it (or send a dead one) on a deferred retry after sign-out.
+
+- The webhook id is the proof, with the same trust as the `mobile_app` webhooks. It removes only a `mobile_app` entry
+  whose `webhook_id` matches **and** whose `app_id` is this integration's bundle id; other apps' registrations
+  are never touched.
+- When the request carries a valid login, that user must own the registration (the entry's `user_id`), else 403.
+- Answers:
+
+| Status | Body | Meaning |
+|---|---|---|
+| 200 | `{"removed": true}` | The registration was removed (entry, entities and notify target go; so does this integration's state for it). |
+| 410 | `{"error": "unknown_webhook"}` | No such S+H registration (already removed, or never ours). Treat as success: forget the stored webhook. |
+| 400 | `{"error": "bad_request"}` | Body isn't a JSON object with a non-empty string `webhook_id`. |
+| 403 | `{"error": "forbidden"}` | Valid login, but another user's registration. |
+| 429 | `{"error": "rate_limited"}`, `Retry-After: 60` | More than 10 calls a minute from one address without a login. Retry later. |
+| 503 | `{"error": "unavailable"}` | The integration isn't loaded. Retry later. |
+
+- Not retrying a 200 or 410 is correct. Retry 429, 503 and network errors.
+- **A removed registration can't tell the app.** Home Assistant answers a post to a webhook it removed in this run with
+  200 and an empty body (the 410 for removed webhooks only exists after the next Home Assistant restart), so an app
+  whose registration an admin deleted may keep posting with no error until then. After this call the app should forget
+  the webhook either way.
 
 ## 3. What arrives (APNs `userInfo`)
 

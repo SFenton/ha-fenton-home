@@ -3,6 +3,7 @@
 The pre-1.0 paths ``/api/fenton_push/config`` and ``/api/fenton_push/apns`` are aliases on the same handlers.
 
 - ``GET /api/fenton_home/config`` (Home Assistant access token): tells the app which ``push_url`` to register.
+- ``POST /api/fenton_home/devices/unregister`` (see ``UnregisterView``): the app removes its own registration.
 - ``POST /api/fenton_home/apns`` (no token): the ``push_url`` itself. ``mobile_app`` posts here without
   credentials, so a request is only honoured when its webhook id and push token match a real Fenton Home
   registration; both are secrets Home Assistant and the app share.
@@ -16,19 +17,33 @@ from __future__ import annotations
 import copy
 import hmac
 import logging
+import time
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any
 
 from aiohttp import web
-from homeassistant.components.http import KEY_HASS, HomeAssistantView
+from homeassistant.components.http import KEY_HASS, KEY_HASS_USER, HomeAssistantView
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.network import NoURLAvailableError, get_url
 
 from . import recovery
+from .devices import short
 from .apns import ENVIRONMENTS, APNsError
-from .const import API_CONFIG, API_PUSH, LEGACY_API_CONFIG, LEGACY_API_PUSH, APP_DATA_ENVIRONMENT, CONF_PUSH_BASE_URL, DAILY_LIMIT, DOMAIN
+from .const import (
+    API_CONFIG,
+    API_PUSH,
+    API_UNREGISTER,
+    APP_DATA_ENVIRONMENT,
+    CONF_PUSH_BASE_URL,
+    DAILY_LIMIT,
+    DOMAIN,
+    LEGACY_API_CONFIG,
+    LEGACY_API_PUSH,
+    MOBILE_APP,
+    UNREGISTER_PER_MINUTE,
+)
 from .payload import PayloadError, build
 from .targets import registration
 
@@ -45,6 +60,7 @@ def register_views(hass: HomeAssistant) -> None:
         return
     hass.http.register_view(ConfigView())
     hass.http.register_view(PushView())
+    hass.http.register_view(UnregisterView())
     hass.data[_REGISTERED] = True
 
 
@@ -79,6 +95,10 @@ class DailyCounter:
             self.sent.clear()
             self.errors.clear()
 
+    def forget(self, key: str) -> None:
+        self.sent.pop(key, None)
+        self.errors.pop(key, None)
+
     def exhausted(self, key: str, now: datetime | None = None) -> bool:
         self._roll(now or datetime.now(UTC))
         return self.sent[key] >= self.limit
@@ -87,6 +107,30 @@ class DailyCounter:
         resets = datetime.combine(self._day + timedelta(days=1), datetime.min.time(), tzinfo=UTC)
         return {"successful": self.sent[key], "errors": self.errors[key], "maximum": self.limit,
                 "resetsAt": resets.isoformat()}
+
+
+class CallLimiter:
+    """At most ``limit`` calls per client address per sliding minute (a light guard against probing webhook ids)."""
+
+    def __init__(self, limit: int = UNREGISTER_PER_MINUTE, window: float = 60.0) -> None:
+        self.limit = limit
+        self.window = window
+        self._calls: dict[str, list[float]] = {}
+
+    def allow(self, key: str, now: float | None = None) -> bool:
+        now = time.monotonic() if now is None else now
+        recent = [t for t in self._calls.get(key, []) if now - t < self.window]
+        allowed = len(recent) < self.limit
+        if allowed:
+            recent.append(now)
+        if recent:
+            self._calls[key] = recent
+        else:
+            self._calls.pop(key, None)
+        if len(self._calls) > 1024:  # forget quiet addresses so the table can't grow without bound
+            for stale in [k for k, v in self._calls.items() if now - v[-1] >= self.window]:
+                del self._calls[stale]
+        return allowed
 
 
 def _message(text: str, status: HTTPStatus) -> web.Response:
@@ -225,3 +269,54 @@ class PushView(HomeAssistantView):
         if err.status == 0:
             return _message(f"Couldn't reach Apple ({err.reason})", HTTPStatus.BAD_GATEWAY)
         return _message(f"Apple refused the push ({err.status} {err.reason})", HTTPStatus.BAD_GATEWAY)
+
+
+class UnregisterView(HomeAssistantView):
+    """The app removes its own ``mobile_app`` registration (sign-out, or a retry after a failed sign-out).
+
+    ``POST {"webhook_id": "<id>"}``. The webhook id is the proof, with the same trust as ``mobile_app``'s own webhooks,
+    so no login is needed and a retry still works after the access token is gone. It can only remove a registration of
+    this integration's app (``app_id`` equals the bundle id). When the request does carry a valid Home Assistant login,
+    that user must own the registration (403 otherwise). Answers: 200 ``{"removed": true}``; 410 ``unknown_webhook``
+    when there is no such S+H registration (already gone counts as done); 400 for a bad body; 429 past the per-address
+    cap on calls without a login; 503 while the integration isn't loaded.
+    """
+
+    url = API_UNREGISTER
+    name = "api:fenton_home:devices:unregister"
+    requires_auth = False
+
+    def __init__(self) -> None:
+        self.limiter = CallLimiter()
+
+    async def post(self, request: web.Request) -> web.Response:
+        hass = request.app[KEY_HASS]
+        runtime = _runtime(hass)
+        if runtime is None:
+            return web.json_response({"error": "unavailable"}, status=HTTPStatus.SERVICE_UNAVAILABLE)
+        user = request.get(KEY_HASS_USER)
+        if user is None and not self.limiter.allow(request.remote or "unknown"):
+            return web.json_response({"error": "rate_limited"}, status=HTTPStatus.TOO_MANY_REQUESTS,
+                                     headers={"Retry-After": "60"})
+        try:
+            body: Any = await request.json()
+        except ValueError:
+            body = None
+        webhook_id = body.get("webhook_id") if isinstance(body, dict) else None
+        if not isinstance(webhook_id, str) or not webhook_id:
+            return web.json_response({"error": "bad_request"}, status=HTTPStatus.BAD_REQUEST)
+
+        if not webhook_id.isascii():  # compare_digest on non-ASCII str raises TypeError
+            return web.json_response({"error": "bad_request"}, status=HTTPStatus.BAD_REQUEST)
+        wanted = webhook_id.encode()
+        entry = next((e for e in hass.config_entries.async_entries(MOBILE_APP)
+                      if e.data.get("app_id") == runtime.bundle_id
+                      and hmac.compare_digest(str(e.data.get("webhook_id") or "").encode(), wanted)), None)
+        if entry is None:
+            return web.json_response({"error": "unknown_webhook"}, status=HTTPStatus.GONE)
+        if user is not None and user.id != entry.data.get("user_id"):
+            return web.json_response({"error": "forbidden"}, status=HTTPStatus.FORBIDDEN)
+        name = entry.data.get("device_name", "device")
+        await hass.config_entries.async_remove(entry.entry_id)
+        _LOGGER.info("Unregistered %s (webhook %s…) at the app's request", name, short(webhook_id))
+        return web.json_response({"removed": True})

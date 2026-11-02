@@ -121,7 +121,7 @@ async def _import_legacy(hass: HomeAssistant) -> None:
 # -- aliases ---------------------------------------------------------------------------------------------------------
 
 
-def async_register_alias_service(hass: HomeAssistant, handler: Any, schema: Any) -> None:
+async def async_register_alias_service(hass: HomeAssistant, handler: Any, schema: Any) -> None:
     """``fenton_push.problem``: the same as ``fenton_home.problem``, plus a Repairs issue naming the new service."""
 
     async def _alias(call: ServiceCall) -> None:
@@ -135,7 +135,9 @@ def async_register_alias_service(hass: HomeAssistant, handler: Any, schema: Any)
 
     hass.services.async_register(LEGACY_DOMAIN, SERVICE_PROBLEM, _alias, schema=schema)
     # The old domain has no services.yaml; describe the service so Home Assistant doesn't log that it can't load one.
-    description = load_yaml_dict(str(Path(__file__).parent / "services.yaml")).get(SERVICE_PROBLEM, {})
+    # Read in the executor: a file open inside the event loop is a blocking call Home Assistant logs.
+    services = await hass.async_add_executor_job(load_yaml_dict, str(Path(__file__).parent / "services.yaml"))
+    description = services.get(SERVICE_PROBLEM, {})
     service_helper.async_set_service_schema(hass, LEGACY_DOMAIN, SERVICE_PROBLEM, description)
 
 

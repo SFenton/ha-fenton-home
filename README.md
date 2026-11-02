@@ -108,7 +108,105 @@ button, and the notification is cleared when it ends. A problem with no task end
 - **Send critical alerts.** Leave off until Apple grants the app the Critical Alerts entitlement. While it is off, `critical` notifications arrive as time-sensitive with the default sound.
 - **Push address base URL.** Where Home Assistant can reach itself (for example `http://127.0.0.1:8123`). Empty uses the internal URL.
 - **Show job cards**, **Jobs that get a card**, **Devices that get cards.** The master switch for Live Activity cards, which jobs run, and which devices (empty: every device with Live Activities allowed) get them. With the switch off, problems go to everyone as ordinary notifications.
+- **Sweep abandoned registrations.** `off`, `dry_run` (default: list candidates, remove nothing) or `on`; see Device lifecycle.
+- **Presence auto-enrolment**, **Presence dry run**, **Trackers kept out of presence.** See Presence.
 - **Notify action for people without the app.** The action that reaches a person's whole phone, with `*` for their first name; the default `*_s_phone` is `notify.stephen_s_phone`.
+
+## Device lifecycle (1.1)
+
+Each phone, iPad or watch signed in to the app is a `mobile_app` registration. The app removes its own when the person
+signs out (`POST /api/fenton_home/devices/unregister`, contract section 2a), and a failed call is retried later with the
+registration's webhook id alone. A removal by the app, by an admin in Settings, or by the sweep below also drops what
+this integration kept for that registration: job cards and their timers, the daily push counter and timestamp counters.
+Home Assistant itself removes the entities, the notify target and its Live Activity tokens.
+
+### Sweep of abandoned registrations
+
+A reinstall or a new login that registers afresh leaves the old registration behind. The **Sweep abandoned
+registrations** option (`off`, `dry_run`, `on`; default `dry_run`) finds those, at startup and then daily. A
+registration of this app is a candidate when it has stopped updating (newest state among its entities, else the
+entry's last change) and either:
+
+- it has no push details (the app signed out) and 14 days have passed, or
+- the same person has a newer S+H registration of the same model and 7 days have passed.
+
+Other apps' registrations (the official Companion app included) are never touched. In `dry_run` each candidate is
+logged at info and listed in a Repairs issue, and nothing is removed; in `on` each is removed and logged. Read the
+dry-run list for a while before turning it on.
+
+Known limit: Home Assistant restores entity states at startup with the restart time as their last update, and no
+other reliable per-registration activity signal exists, so right after a restart a registration looks freshly
+updated and the sweep finds little until that many days pass without a restart. The sweep errs towards keeping.
+
+## Presence (1.2)
+
+A person that tracks every phone follows whichever reported last, so a phone left at home flips the house between Away
+and Home. The fix is one [Composite](https://github.com/pnbruckner/ha-composite-tracker) tracker per person (with
+`require_movement`) that the person tracks alone. But Home Assistant's `mobile_app` adds each new registration's tracker
+straight to its person, which bypasses the composite. **Presence** keeps the two in step:
+
+1. A registration (`entry.data["user_id"]`) belongs to the person with that `user_id`, Companion registrations included.
+2. That person's composite inputs become all of that user's `mobile_app` trackers minus the exclude list. Inputs keep
+   their place and their own settings; inputs from other integrations (a car) stay; inputs of someone else's device,
+   a disabled tracker or one that no longer exists are removed. The last input is never removed.
+3. The person's `device_trackers` lose every `mobile_app` tracker (the composite stays), once the composite covers it.
+4. Registrations removed by the app's sign-out, the sweep or an admin drop out the same way: removing a registration
+   removes its entities, which triggers a pass.
+
+A pass runs at startup, two seconds after any `device_tracker` entity is created, removed or disabled, and when a
+person changes (that is how the auto-add is noticed). It writes nothing when nothing differs and logs each change at
+info (`Presence changed ...`).
+
+Options (the integration's Configure dialog):
+
+- **Presence auto-enrolment** (`presence_enabled`, default **off**).
+- **Presence dry run** (`presence_dry_run`, default **on**): log `Presence (dry run) would change ...` and change nothing.
+- **Trackers kept out of presence** (`presence_exclude`), seeded with `device_tracker.iphone_18_pro` (Companion, stale
+  since Nov 1), `device_tracker.iphone_17_pro` (Companion "iPhone 13 Pro (6)", iPhone18,1) and `device_tracker.ipad`;
+  all three are Stephen's (checked against their registrations' `user_id`). An excluded tracker is also taken off the person.
+
+If the Composite integration isn't installed, presence does nothing and raises a Repairs issue. A person with none of
+their trackers being a Composite tracker is left exactly as is, with a Repairs issue per person.
+
+**Composite must be a UI entry.** Presence writes a Composite config entry's options. An entry created from YAML
+(`source: import`) has its options replaced by the YAML on every `composite.reload` and restart, so presence never
+writes one: it logs what it would change and raises the Repairs issue "Move the Composite trackers out of YAML". Until
+the move below, presence is a report only.
+
+### Moving the composites from YAML to the UI (to be approved by the owner; nothing here has been done)
+
+Today `/config/packages/presence_composite.yaml` defines `device_tracker.stephen_location` (Duo
+`device_tracker.stephen_s_iphone_fenton` + 18 Pro `device_tracker.iphone_fenton`, both S+H) and
+`device_tracker.stephanie_location` (`device_tracker.stephanies_iphone`) with `require_movement: true`. Nothing else in
+`/config` YAML mentions them (checked 2026-11-02; UI-built dashboards and automations in `.storage` were not).
+
+Two facts decide the order. A UI entry's entity id comes from its name, and the YAML entries own the ids until they are
+removed. And when an entity leaves the registry, Home Assistant's `person` removes it from every person's trackers.
+So the persons are un-bound for a few minutes in the middle; do it when both are at home or both away, and expect
+`person.*` to show `unknown` meanwhile.
+
+1. Install 1.2.0 and restart. Leave presence off, or on with dry run, and read the log: with YAML composites a dry run
+   reports "managed by YAML" if anything differs and otherwise says nothing. Turn dry run off only in step 6.
+2. Back up: `cp /config/packages/presence_composite.yaml /config/packages/presence_composite.yaml.yaml-to-ui-<date>.bak`.
+3. Remove the `composite:` block from the package file and leave only a comment saying the composites are UI entries
+   owned by S+H Home Integration (or delete the file). `ha core check`, then call `composite.reload` (no restart): the two
+   "from configuration" entries, their entities and the battery and speed sensors are removed, and both persons lose
+   their composite tracker.
+4. Settings, Devices & services, Composite, Add entry, twice. Name exactly `Stephen Location` and `Stephanie Location`
+   (the removed entries' names are free again). Inputs: Stephen
+   `device_tracker.stephen_s_iphone_fenton` and `device_tracker.iphone_fenton`; Stephanie `device_tracker.stephanies_iphone`.
+   Require movement on, the other options off, no picture. Check the new entities are `device_tracker.stephen_location`
+   and `device_tracker.stephanie_location`; if Home Assistant added a `_2`, rename in the entity settings. The battery
+   and speed sensors are named from the entry title and should land on `sensor.stephen_location_battery_level` and
+   `..._speed`; check them the same way.
+5. Settings, People: set each person's tracker to its composite alone (Stephen: `device_tracker.stephen_location`; Stephanie:
+   `device_tracker.stephanie_location`). Check `person.stephen_fenton` and `person.stephanie_hobart` have a state again.
+6. In the integration's options turn **Presence auto-enrolment** on (dry run still on), read the log for "would change"
+   lines (the expected result is none), then turn dry run off.
+7. Rollback: delete the two UI entries and restore the `.bak` package file, call `composite.reload`, re-bind the persons.
+   Presence is a report only while a composite is YAML, so it never fights the file.
+
+No restart is needed for 2 to 6; the restart in step 1 only installs 1.2.0. Ask before any restart.
 
 ## How it works
 
@@ -116,6 +214,7 @@ button, and the notification is cleared when it ends. A problem with no task end
 
 - `GET /api/fenton_home/config` (access token) tells the app which `push_url` to register.
 - `POST /api/fenton_home/apns` is that `push_url`. Home Assistant's `mobile_app` posts each notification there without credentials, so a request is honoured only when its webhook id and push token match a real Fenton Home registration. It maps the notification to an APNs payload (`payload.py`) and sends it over HTTP/2 with a token signed by your key (`apns.py`).
+- `POST /api/fenton_home/devices/unregister` removes the caller's own S+H registration; the webhook id is the proof, and a calls-per-minute cap guards the no-login form.
 - A device gets at most 1,000 pushes per UTC day, as a guard against runaway automations.
 - Apple tokens from Xcode builds use the sandbox service and TestFlight builds use production; the app says which, and a token from the other environment is retried there once.
 
