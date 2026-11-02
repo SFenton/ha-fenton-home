@@ -134,6 +134,10 @@ Other apps' registrations (the official Companion app included) are never touche
 logged at info and listed in a Repairs issue, and nothing is removed; in `on` each is removed and logged. Read the
 dry-run list for a while before turning it on.
 
+Known limit: Home Assistant restores entity states at startup with the restart time as their last update, and no
+other reliable per-registration activity signal exists, so right after a restart a registration looks freshly
+updated and the sweep finds little until that many days pass without a restart. The sweep errs towards keeping.
+
 ## Presence (1.2)
 
 A person that tracks every phone follows whichever reported last, so a phone left at home flips the house between Away
@@ -158,7 +162,8 @@ Options (the integration's Configure dialog):
 - **Presence auto-enrolment** (`presence_enabled`, default **off**).
 - **Presence dry run** (`presence_dry_run`, default **on**): log `Presence (dry run) would change ...` and change nothing.
 - **Trackers kept out of presence** (`presence_exclude`), seeded with `device_tracker.iphone_18_pro` (Companion, stale
-  since Nov 1) and `device_tracker.ipad` (owner unknown). An excluded tracker is also taken off the person.
+  since Nov 1), `device_tracker.iphone_17_pro` (Companion "iPhone 13 Pro (6)", iPhone18,1) and `device_tracker.ipad`;
+  all three are Stephen's (checked against their registrations' `user_id`). An excluded tracker is also taken off the person.
 
 If the Composite integration isn't installed, presence does nothing and raises a Repairs issue. A person with none of
 their trackers being a Composite tracker is left exactly as is, with a Repairs issue per person.

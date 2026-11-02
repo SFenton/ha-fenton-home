@@ -135,18 +135,20 @@ def async_start_sweep(hass: HomeAssistant, runtime: PushRuntime) -> Any:
         except Exception:  # noqa: BLE001 - a sweep must never take the integration down
             _LOGGER.exception("Registration sweep failed")
 
+    once: list[Any] = []
     unsubs = [async_track_time_interval(hass, _run, timedelta(days=1), cancel_on_shutdown=True)]
     if hass.state is CoreState.running:
         hass.async_create_task(_run())
     else:
         @callback
         def _started(_event: Event) -> None:
+            once.clear()  # fired: removing a spent listen_once logs "Unable to remove unknown job listener"
             hass.async_create_task(_run())
 
-        unsubs.append(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _started))
+        once.append(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _started))
 
     def _stop() -> None:
-        for unsub in unsubs:
+        for unsub in [*unsubs, *once]:
             unsub()
 
     return _stop

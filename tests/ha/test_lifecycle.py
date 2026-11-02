@@ -299,3 +299,9 @@ async def test_the_alias_service_file_is_read_in_the_executor(hass: HomeAssistan
             patch("custom_components.fenton_home.legacy.service_helper.async_set_service_schema"):
         await async_register_alias_service(hass, AsyncMock(), None)
     assert calls and calls[0][0] == "load_yaml_dict" and calls[0][1][0].endswith("services.yaml")
+
+
+async def test_non_ascii_webhook_id_is_400_not_500(hass, configured, hass_client_no_auth) -> None:
+    client = await hass_client_no_auth()
+    resp = await client.post(URL, json={"webhook_id": "hook-\u00e9"})
+    assert resp.status == HTTPStatus.BAD_REQUEST

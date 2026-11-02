@@ -210,6 +210,7 @@ class Presence:
         self._pending: Callable[[], None] | None = None
         self._issues: set[str] = set()
         self._unsubs: list[Callable[[], None]] = []
+        self._started: Callable[[], None] | None = None
         self.last_plan: Plan | None = None
 
     def start(self) -> None:
@@ -220,9 +221,17 @@ class Presence:
         if hass.state is CoreState.running:
             self.request(0)
         else:
-            self._unsubs.append(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, lambda _e: self.request(0)))
+            self._started = hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, self._on_started)
+
+    @callback
+    def _on_started(self, _event: Event) -> None:
+        self._started = None  # a listen_once is gone once it fires; removing it again would log an error
+        self.request(0)
 
     def stop(self) -> None:
+        if self._started is not None:
+            self._started()
+            self._started = None
         for unsub in self._unsubs:
             unsub()
         self._unsubs.clear()

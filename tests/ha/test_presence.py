@@ -431,3 +431,17 @@ async def test_on_the_real_state_a_known_tracker_is_moved_into_the_composite_the
     assert world.inputs("device_tracker.stephen_location") == original
     assert world.person_trackers(pid) == ["device_tracker.stephen_location"]
     assert world.inputs("device_tracker.stephanie_location") == ["device_tracker.stephanies_iphone"]
+
+
+async def test_start_before_running_waits_for_started_and_unloads_cleanly(hass, world, caplog) -> None:
+    from homeassistant.core import CoreState  # noqa: PLC0415
+
+    await house(world)
+    hass.set_state(CoreState.starting)
+    p = presence(hass, **ON)
+    p.start()
+    hass.set_state(CoreState.running)
+    hass.bus.async_fire("homeassistant_started")
+    await hass.async_block_till_done()
+    p.stop()      # the listen_once already fired: removing it again would log an error
+    assert "Unable to remove unknown job listener" not in caplog.text

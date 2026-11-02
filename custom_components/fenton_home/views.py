@@ -306,9 +306,12 @@ class UnregisterView(HomeAssistantView):
         if not isinstance(webhook_id, str) or not webhook_id:
             return web.json_response({"error": "bad_request"}, status=HTTPStatus.BAD_REQUEST)
 
+        if not webhook_id.isascii():  # compare_digest on non-ASCII str raises TypeError
+            return web.json_response({"error": "bad_request"}, status=HTTPStatus.BAD_REQUEST)
+        wanted = webhook_id.encode()
         entry = next((e for e in hass.config_entries.async_entries(MOBILE_APP)
                       if e.data.get("app_id") == runtime.bundle_id
-                      and hmac.compare_digest(str(e.data.get("webhook_id") or ""), webhook_id)), None)
+                      and hmac.compare_digest(str(e.data.get("webhook_id") or "").encode(), wanted)), None)
         if entry is None:
             return web.json_response({"error": "unknown_webhook"}, status=HTTPStatus.GONE)
         if user is not None and user.id != entry.data.get("user_id"):
