@@ -74,6 +74,7 @@ class MobileAppStandIn(BaseNotificationService):
 
     def __init__(self) -> None:
         self.sent: list[dict] = []
+        self.unregistered: set[str] = set()  # webhook ids the real service would KeyError on (not in its entries)
 
     def _registrations(self) -> dict[str, dict]:
         return {e.data["webhook_id"]: dict(e.data) for e in self.hass.config_entries.async_entries("mobile_app")}
@@ -85,6 +86,8 @@ class MobileAppStandIn(BaseNotificationService):
 
     async def async_send_message(self, message: str = "", **kwargs) -> None:
         for target in kwargs.get("target") or self.targets.values():
+            if target in self.unregistered:
+                raise KeyError(target)
             if "push_url" not in self._registrations()[target]["app_data"]:
                 raise HomeAssistantError("Device not connected to local push notifications")
             self.sent.append({"target": target, "message": message,
@@ -271,16 +274,51 @@ async def test_unreachable_device_doesnt_block_the_rest(hass: HomeAssistant, con
     assert "Couldn't notify hook-stephen-websocket · Fenton: Device not connected" in caplog.text
 
 
-async def test_device_sharing_a_name(hass: HomeAssistant, configured, caplog) -> None:
-    """Two devices with one name share one mobile_app action, which reaches the newer; the older is logged."""
+def share_name(hass: HomeAssistant, webhook_id: str, name: str) -> None:
+    entry = next(e for e in hass.config_entries.async_entries("mobile_app") if e.data["webhook_id"] == webhook_id)
+    hass.config_entries.async_update_entry(entry, data={**entry.data, "device_name": name})
+
+
+async def test_devices_sharing_a_name_all_get_it(hass: HomeAssistant, configured, caplog) -> None:
+    """mobile_app keeps one action per name; going by webhook id reaches every device regardless."""
     mobile_app_entry(hass, "hook-stephen-old-iphone", STEPHEN)
-    hass.config_entries.async_update_entry(hass.config_entries.async_entries("mobile_app")[-1], data={
-        **hass.config_entries.async_entries("mobile_app")[-1].data, "device_name": "hook-stephen-iphone · Fenton"})
+    mobile_app_entry(hass, "hook-stephen-older-iphone", STEPHEN)
+    for webhook in ("hook-stephen-old-iphone", "hook-stephen-older-iphone"):
+        share_name(hass, webhook, "hook-stephen-iphone · Fenton")
     service = mobile_app(hass)
     await service.async_register_services()
+    await hass.services.async_call("notify", "fenton_stephen", {"message": "Hi", "title": "T", "data": {"tag": "x"}},
+                                   blocking=True)
+    assert sorted(reached(service)) == ["hook-stephen-ipad", "hook-stephen-iphone", "hook-stephen-old-iphone",
+                                        "hook-stephen-older-iphone"]
+    assert service.sent[0]["title"] == "T" and service.sent[0]["data"] == {"tag": "x"}
+    assert "Couldn't notify" not in caplog.text
+
+
+async def test_a_device_mobile_app_doesnt_know_is_skipped(hass: HomeAssistant, configured, caplog) -> None:
+    mobile_app(hass).unregistered.add("hook-stephen-iphone")
     await hass.services.async_call("notify", "fenton_stephen", {"message": "Hi"}, blocking=True)
-    assert len(service.sent) == 2
-    assert "has no notify action for it" in caplog.text
+    assert reached(mobile_app(hass)) == ["hook-stephen-ipad"]
+    assert "mobile_app has no registration for webhook" not in [r.message for r in caplog.records
+                                                                if r.levelname == "WARNING"]
+    assert "Couldn't notify hook-stephen-iphone · Fenton" in caplog.text
+
+
+async def test_without_the_service_object_the_name_action_is_the_fallback(hass: HomeAssistant, configured, monkeypatch,
+                                                                         caplog) -> None:
+    monkeypatch.setattr("custom_components.fenton_push.notify.NOTIFY_SERVICES", None)
+    await hass.services.async_call("notify", "fenton_stephen", {"message": "Hi", "title": "T"}, blocking=True)
+    service = mobile_app(hass)
+    assert reached(service) == ["hook-stephen-iphone", "hook-stephen-ipad"]
+    assert "Couldn't notify" not in caplog.text
+
+
+async def test_the_fallback_logs_a_device_with_no_action(hass: HomeAssistant, configured, monkeypatch, caplog) -> None:
+    monkeypatch.setattr("custom_components.fenton_push.notify.NOTIFY_SERVICES", None)
+    mobile_app_entry(hass, "hook-stephen-unnamed", STEPHEN)  # its action isn't registered yet
+    await hass.services.async_call("notify", "fenton_stephen", {"message": "Hi"}, blocking=True)
+    assert reached(mobile_app(hass)) == ["hook-stephen-iphone", "hook-stephen-ipad"]
+    assert "Couldn't notify hook-stephen-unnamed · Fenton: Home Assistant has no way to reach it" in caplog.text
 
 
 async def test_unload(hass: HomeAssistant, configured, hass_client_no_auth) -> None:

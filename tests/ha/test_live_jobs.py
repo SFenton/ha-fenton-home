@@ -208,7 +208,8 @@ async def test_a_new_registration_with_a_token_gets_the_running_jobs(hass: HomeA
 
 
 async def test_a_missing_notify_action_is_logged_and_retried(hass: HomeAssistant, world, caplog) -> None:
-    mobile_app_entry(hass, "hook-nameless", STEPHEN, app_data=dict(LIVE_DATA))  # no action registered for it
+    mobile_app_entry(hass, "hook-nameless", STEPHEN, app_data=dict(LIVE_DATA))
+    world.service.unregistered.add("hook-nameless")  # mobile_app has no entry for it
     start_fan(hass)
     await settle(hass)
     assert "No notify action for hook-nameless" in caplog.text
@@ -675,8 +676,41 @@ async def test_nothing_runs_before_home_assistant_has_started(hass: HomeAssistan
     assert {s["target"] for s in sent(world, since=count)} == {"hook-stephen-iphone", "hook-stephen-ipad"}
 
 
+async def test_devices_sharing_a_name_each_get_their_card(hass: HomeAssistant, world) -> None:
+    for webhook in ("hook-stephen-ipad", "hook-stephen-iphone"):
+        entry = next(e for e in hass.config_entries.async_entries("mobile_app") if e.data["webhook_id"] == webhook)
+        hass.config_entries.async_update_entry(entry, data={**entry.data, "device_name": "Stephen's iPhone · Fenton"})
+    start_fan(hass)
+    await settle(hass)
+    assert sorted(s["target"] for s in sent(world)) == ["hook-stephen-ipad", "hook-stephen-iphone"]
+
+
+async def test_cards_fall_back_to_the_name_action_without_the_service_object(hass: HomeAssistant, world,
+                                                                            monkeypatch) -> None:
+    monkeypatch.setattr("custom_components.fenton_push.notify.NOTIFY_SERVICES", None)
+    start_fan(hass)
+    await settle(hass)
+    assert sorted(s["target"] for s in sent(world)) == ["hook-stephen-ipad", "hook-stephen-iphone"]
+
+
+async def test_a_card_refused_by_mobile_app_is_logged_and_retried(hass: HomeAssistant, world, caplog) -> None:
+    original = world.service.async_send_message
+
+    async def refuse(message="", **kwargs):
+        if kwargs.get("target") == ["hook-stephen-ipad"]:
+            raise HomeAssistantError("Device not connected")
+        await original(message, **kwargs)
+
+    world.service.async_send_message = refuse
+    start_fan(hass)
+    await settle(hass)
+    assert "Couldn't send job.fan.guest to hook-stephen-ipad: Device not connected" in caplog.text
+    assert {s["target"] for s in sent(world)} == {"hook-stephen-iphone"}
+
+
 async def test_a_device_with_no_notify_action_is_warned_about_once_and_retried(hass: HomeAssistant, world, caplog) -> None:
     mobile_app_entry(hass, "hook-nameless", STEPHEN, app_data=dict(LIVE_DATA))
+    world.service.unregistered.add("hook-nameless")
     start_fan(hass)
     await settle(hass)
     hass.states.async_set("input_datetime.guest_bathroom_fan_timer_ends_at", "x", {"timestamp": time.time() + 2400})
