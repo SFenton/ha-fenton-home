@@ -1,11 +1,12 @@
 """Person targets: ``notify.fenton_<name>`` sends to every device where that person is signed in to Fenton Home.
 
-Each matching device is reached through its own ``mobile_app`` action (``notify.mobile_app_<device name>``), so
-``mobile_app`` still decides between its websocket channel and our ``push_url`` and handles Live Activity tokens.
-``mobile_app`` registers no shared action of its own (discovery gives it no name, so its base action is the generic
-``notify.notify``, which another integration may own). One call per device also means a websocket-only device that
-isn't connected, which ``mobile_app`` raises for, is logged and the rest still get the notification. The
-notification data is passed through untouched; ``data.fenton.devices`` (``phone``, ``tablet``, ``watch``) narrows
+Each matching device is reached by its webhook id through ``mobile_app``'s own notification service object
+(``send_to_device``), so ``mobile_app`` still decides between its websocket channel and our ``push_url`` and handles
+Live Activity tokens. Going by webhook id matters: ``mobile_app`` keeps one ``notify.mobile_app_<device name>`` action
+per name, so devices that share a name (three registrations called "Stephen's iPhone · Fenton") can't be told apart
+by action. One call per device means a websocket-only device that isn't connected, which ``mobile_app`` raises for,
+is logged and the rest still get the notification. When the service object isn't reachable, the name-based action is
+the fallback. The notification data is passed through untouched; ``data.fenton.devices`` (``phone``, ``tablet``, ``watch``) narrows
 the devices.
 """
 
@@ -44,6 +45,39 @@ def _device_actions(hass: HomeAssistant) -> dict[str, str] | None:
         for action, webhook_id in (getattr(service, "registered_targets", None) or {}).items():
             actions[webhook_id] = action
     return actions
+
+
+def _mobile_app_service(hass: HomeAssistant) -> Any | None:
+    """``mobile_app``'s notification service object, when Home Assistant exposes it."""
+    if NOTIFY_SERVICES is None or (services := hass.data.get(NOTIFY_SERVICES)) is None:
+        return None
+    for service in services.get(MOBILE_APP, []):
+        if callable(getattr(service, "async_send_message", None)):
+            return service
+    return None
+
+
+async def send_to_device(hass: HomeAssistant, device: Device | None, webhook_id: str, service_data: dict[str, Any],
+                         actions: dict[str, str] | None = None) -> bool:
+    """Send one notification to one device by webhook id. ``False`` when there is no way to reach it.
+
+    Raises ``HomeAssistantError`` when ``mobile_app`` refuses (a websocket-only device that isn't connected).
+    ``device`` is only needed for the by-name fallback; ``actions`` is ``_device_actions(hass)`` if the caller has it.
+    """
+    if (service := _mobile_app_service(hass)) is not None:
+        kwargs = {k: v for k, v in service_data.items() if k != "message"}
+        try:
+            await service.async_send_message(service_data.get("message", ""), target=[webhook_id], **kwargs)
+        except KeyError:  # mobile_app has no registration under this webhook id (removed, or not loaded yet)
+            _LOGGER.warning("mobile_app has no registration for webhook %s", webhook_id)
+            return False
+        return True
+    if device is None:
+        return False
+    if (action := _device_action(hass, actions if actions is not None else _device_actions(hass), device)) is None:
+        return False
+    await hass.services.async_call("notify", action, service_data, blocking=True)
+    return True
 
 
 def _device_action(hass: HomeAssistant, actions: dict[str, str] | None, device: Device) -> str | None:
@@ -112,11 +146,11 @@ class FentonNotificationService(BaseNotificationService):
             service_data[ATTR_DATA] = data
         actions = _device_actions(self.hass)
         for device in devices.values():
-            if (action := _device_action(self.hass, actions, device)) is None:
-                _LOGGER.warning("Couldn't notify %s: Home Assistant has no notify action for it (does another device "
-                                "have the same name?)", device.name)
-                continue
             try:
-                await self.hass.services.async_call("notify", action, service_data, blocking=True)
+                sent = await send_to_device(self.hass, device, device.webhook_id, service_data, actions)
             except HomeAssistantError as err:
                 _LOGGER.warning("Couldn't notify %s: %s", device.name, err)
+                continue
+            if not sent:
+                _LOGGER.warning("Couldn't notify %s: Home Assistant has no way to reach it (is it registered with "
+                                "mobile_app?)", device.name)

@@ -1,7 +1,7 @@
 """The job engine inside Home Assistant: listens to the house, sends the cards, answers the buttons.
 
-``engine.Engine`` decides what every device should show; this module feeds it states, sends what it plans through core's
-``notify.mobile_app_<device>`` actions (core keeps owning the Live Activity tokens), runs the control map when a card's
+``engine.Engine`` decides what every device should show; this module feeds it states, sends what it plans to each device by
+webhook id through core's ``mobile_app`` notify service (core keeps owning the Live Activity tokens), runs the control map when a card's
 button is pressed and keeps problems tied to their Donetick tasks. Spec: ``live-activities-per-job.md`` sections 2 to 7.
 """
 
@@ -54,7 +54,7 @@ from .entities import (
 )
 from .jobs import Ctx
 from .model import Control, Expect, JobState, PersonRef
-from .notify import _device_action, _device_actions
+from .notify import _device_actions, send_to_device
 from .problems import ProblemRecord, build_problem, code_for_raw
 from .snapshot import States
 from .targets import Device, live_devices, people
@@ -317,19 +317,19 @@ class LiveJobs:
         devices = {d.webhook_id: d for d in live_devices(self.hass, self.runtime.bundle_id)}
         for action in plan.actions:
             device = devices.get(action.webhook_id)
-            service = _device_action(self.hass, actions, device) if device else None
-            if service is None:
-                if action.webhook_id not in self._no_action:
-                    self._no_action.add(action.webhook_id)
-                    _LOGGER.warning("No notify action for %s; its %s card isn't sent", action.webhook_id, action.tag)
+            try:
+                sent = device is not None and await send_to_device(
+                    self.hass, device, action.webhook_id, service_data(action), actions)
+            except HomeAssistantError as err:
+                _LOGGER.warning("Couldn't send %s to %s: %s", action.tag, action.webhook_id, err)
                 if isinstance(action, Push):
                     self.engine.push_failed(action.webhook_id, action.tag, now)
                     failed = True
                 continue
-            try:
-                await self.hass.services.async_call("notify", service, service_data(action), blocking=True)
-            except HomeAssistantError as err:
-                _LOGGER.warning("Couldn't send %s to %s: %s", action.tag, action.webhook_id, err)
+            if not sent:
+                if action.webhook_id not in self._no_action:
+                    self._no_action.add(action.webhook_id)
+                    _LOGGER.warning("No notify action for %s; its %s card isn't sent", action.webhook_id, action.tag)
                 if isinstance(action, Push):
                     self.engine.push_failed(action.webhook_id, action.tag, now)
                     failed = True
