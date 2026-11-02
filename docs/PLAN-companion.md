@@ -36,7 +36,9 @@ the `fenton_live_activity_*` events. The integration owns no entities.
 
 ### Cutover on the owner's server (one restart, minutes without push)
 1. Back up `/config/automations.yaml`. HACS: install S+H Home Integration, remove Fenton Home Push.
-2. Restart. `fenton_home` imports the old entry and serves the new and alias paths.
+2. Restart, then Settings → Add integration → S+H Home Integration (or add `fenton_home:` to `configuration.yaml`
+   before the restart): HA loads a domain only with an entry or a YAML key. The import copies the old entry, removes it,
+   and the integration serves the new and alias paths.
 3. Edit `automations.yaml:5339` to `fenton_home.problem`; `ha core check`; reload automations.
 4. Send a test `notify.fenton_stephen`; open S+H on each phone; confirm `push_url` moved.
 
