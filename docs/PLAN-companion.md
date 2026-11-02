@@ -86,7 +86,7 @@ Owner request, 2026-11-02. Full brief: Fenton-HASS-Native `build/handoff/presenc
   1. On startup and on any mobile_app tracker create or remove, map registration → `entry.data["user_id"]` → person
      (the ownership lookup 1.1 adds).
   2. Keep that person's composite inputs equal to all the user's mobile_app trackers (Companion ones included) minus an
-     exclude list, seeded with `device_tracker.iphone_18_pro` and `device_tracker.ipad`.
+     exclude list, seeded with `device_tracker.iphone_18_pro`, `device_tracker.iphone_17_pro` (Companion "iPhone 13 Pro (6)", an iPhone 17 Pro, idle since Sep 20) and `device_tracker.ipad`.
   3. Keep the person bound only to its composite; undo mobile_app's auto-add.
   4. A registration removed by 1.1's sign-out drops out of the composite through the same path.
   5. `composite` in `after_dependencies`; missing → presence off with a Repairs issue.
@@ -110,10 +110,8 @@ Owner request, 2026-11-02. Full brief: Fenton-HASS-Native `build/handoff/presenc
   from the code through `async_update_entry`; Composite's own update listener applies them without a reload.
 - Found, and the reason the migration order matters: when an entity leaves the registry, `person` removes it from every
   person's trackers, so deleting the YAML entries un-binds both persons until step 5.
-- Unverified: whose registration `device_tracker.iphone_17_pro` ("Stephen's iPhone", model "iPhone 13 Pro (6)", Companion,
-  entry `01K7MRNWZ39QSNV4M86SJZ9JAP`) is. No read-only API exposes a `mobile_app` entry's `user_id`. If it is Stephen's,
-  presence would add it to his composite (once the composite is a UI entry); add it to the exclude list first if that is
-  not wanted. The same holds for who owns `device_tracker.ipad`, which is excluded anyway.
+- Checked 2026-11-02: `device_tracker.iphone_17_pro` (Companion "iPhone 13 Pro (6)", hardware iPhone18,1) and
+  `device_tracker.ipad` both belong to Stephen; both are on the default exclude list.
 - The YAML to UI move is **not done**; the owner approves it first.
 
 #### Moving the composites from YAML to the UI (to be approved by the owner; nothing here has been done)

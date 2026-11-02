@@ -339,7 +339,7 @@ async def test_options_flow(hass: HomeAssistant, configured) -> None:
         CONF_CRITICAL_ALERTS: True, CONF_PUSH_BASE_URL: "http://127.0.0.1:8123", "live_jobs_enabled": True,
         "live_jobs": list(JOB_IDS), "live_devices": [], "person_notify": "*_s_phone", "sweep_mode": "dry_run",
         "presence_enabled": False, "presence_dry_run": True,
-        "presence_exclude": ["device_tracker.iphone_18_pro", "device_tracker.ipad"]}
+        "presence_exclude": ["device_tracker.iphone_18_pro", "device_tracker.iphone_17_pro", "device_tracker.ipad"]}
     assert hass.data[DOMAIN][configured.entry_id].critical_alerts is True
 
 

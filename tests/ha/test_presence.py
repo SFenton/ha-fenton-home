@@ -162,13 +162,12 @@ async def test_dry_run_against_todays_server_changes_nothing(hass, world, caplog
 
 
 async def test_if_the_old_phone_is_stephens_presence_would_add_it_unless_excluded(hass, world) -> None:
-    """The unknown: if ``iphone_17_pro`` is Stephen's, a UI composite would take it in (a YAML one is only reported)."""
+    """``iphone_17_pro`` is Stephen's (checked 2026-11-02) and excluded by default; without that, a composite takes it in."""
     await _build_real(hass, world, unknown_owner="stephen", source=SOURCE_IMPORT)
-    plan = await async_plan(hass, DRY)
+    plan = await async_plan(hass, {**DRY, CONF_PRESENCE_EXCLUDE: ["device_tracker.iphone_18_pro", "device_tracker.ipad"]})
     assert plan.actions == [] and ISSUE_PRESENCE_COMPOSITE_YAML in plan.issues, "YAML composite: reported, not written"
     assert plan.issues[ISSUE_PRESENCE_COMPOSITE_YAML][1]["trackers"] == "device_tracker.stephen_location"
-    plan = await async_plan(hass, {**DRY, CONF_PRESENCE_EXCLUDE: [*DEFAULT_PRESENCE_EXCLUDE,
-                                                                  "device_tracker.iphone_17_pro"]})
+    plan = await async_plan(hass, DRY)
     assert plan.actions == [] and plan.issues == {}
 
 
@@ -424,12 +423,11 @@ async def test_on_the_real_state_a_known_tracker_is_moved_into_the_composite_the
     original = world.inputs("device_tracker.stephen_location")
     await hass.data["person"][1].async_update_item(pid, {"device_trackers": [
         "device_tracker.stephen_location", "device_tracker.iphone_17_pro"]})
-    await presence(hass, **ON).async_reconcile()
+    await presence(hass, **ON, **{CONF_PRESENCE_EXCLUDE: ["device_tracker.iphone_18_pro", "device_tracker.ipad"]}).async_reconcile()
     assert world.inputs("device_tracker.stephen_location") == [*original, "device_tracker.iphone_17_pro"]
     assert world.person_trackers(pid) == ["device_tracker.stephen_location"]
     # Restore: put the phone on the exclude list and the composite is back to what the server has today.
-    await presence(hass, **ON, **{CONF_PRESENCE_EXCLUDE: [*DEFAULT_PRESENCE_EXCLUDE,
-                                                           "device_tracker.iphone_17_pro"]}).async_reconcile()
+    await presence(hass, **ON).async_reconcile()
     assert world.inputs("device_tracker.stephen_location") == original
     assert world.person_trackers(pid) == ["device_tracker.stephen_location"]
     assert world.inputs("device_tracker.stephanie_location") == ["device_tracker.stephanies_iphone"]
