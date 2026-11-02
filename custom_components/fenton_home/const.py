@@ -67,3 +67,13 @@ EVENT_DISMISSED = "fenton_live_activity_dismissed"
 SENSOR_JOBS = "sensor.fenton_live_jobs"
 ISSUE_LEGACY_STILL_INSTALLED = "legacy_still_installed"
 ISSUE_SWEEP_CANDIDATES = "sweep_candidates"
+
+#: Presence auto-enrolment (``presence.py``): the master switch (off until the owner turns it on), dry run (log what
+#: would change, change nothing; on by default) and the trackers kept out of every composite.
+CONF_PRESENCE_ENABLED = "presence_enabled"
+CONF_PRESENCE_DRY_RUN = "presence_dry_run"
+CONF_PRESENCE_EXCLUDE = "presence_exclude"
+DEFAULT_PRESENCE_EXCLUDE = ["device_tracker.iphone_18_pro", "device_tracker.ipad"]
+ISSUE_PRESENCE_COMPOSITE_MISSING = "presence_composite_missing"
+ISSUE_PRESENCE_NO_COMPOSITE = "presence_no_composite"
+ISSUE_PRESENCE_COMPOSITE_YAML = "presence_composite_yaml"

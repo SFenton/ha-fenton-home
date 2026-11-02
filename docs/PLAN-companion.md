@@ -95,3 +95,58 @@ Owner request, 2026-11-02. Full brief: Fenton-HASS-Native `build/handoff/presenc
      (read `composite/config_flow.py` and `__init__.py` for how a YAML import overwrites options); retire the package.
 - Done: a dry run shows no change today; a test adds a tracker to a person and sees it moved into the composite;
   memory `presence-composite-trackers` and the package header updated or the file removed; ask before any HA restart.
+
+### Shipped in 1.2.0 (`presence.py`; `presence_enabled` off, `presence_dry_run` on, `presence_exclude` seeded)
+
+- Pass at startup, 2 s after any `device_tracker` registry create, remove or disable, and on any person change.
+  Registration -> `entry.data["user_id"]` -> person with that `user_id`; composite = the person's tracker whose registry
+  platform is `composite`. Inputs keep order and settings, other integrations' inputs stay, the last input is never
+  removed; `mobile_app` trackers come off the person once the composite covers them (or they are excluded).
+- Read-only facts from the live server (2026-11-02, HA 2026.10.4, websocket `config/entity_registry/list`, `person/list`,
+  `get_states`; fixture `tests/fixtures/presence-real-2026-11-02.json`): both persons track only their composite; both
+  composites are `source: import`; their inputs are as the brief says. Composite 4.3.0 `async_step_import` replaces an
+  import entry's options on every `composite.reload` and restart, and import entries have no options flow, so presence
+  never writes one: it reports (log + Repairs "Move the Composite trackers out of YAML"). UI entries get their options
+  from the code through `async_update_entry`; Composite's own update listener applies them without a reload.
+- Found, and the reason the migration order matters: when an entity leaves the registry, `person` removes it from every
+  person's trackers, so deleting the YAML entries un-binds both persons until step 5.
+- Unverified: whose registration `device_tracker.iphone_17_pro` ("Stephen's iPhone", model "iPhone 13 Pro (6)", Companion,
+  entry `01K7MRNWZ39QSNV4M86SJZ9JAP`) is. No read-only API exposes a `mobile_app` entry's `user_id`. If it is Stephen's,
+  presence would add it to his composite (once the composite is a UI entry); add it to the exclude list first if that is
+  not wanted. The same holds for who owns `device_tracker.ipad`, which is excluded anyway.
+- The YAML to UI move is **not done**; the owner approves it first.
+
+#### Moving the composites from YAML to the UI (to be approved by the owner; nothing here has been done)
+
+Today `/config/packages/presence_composite.yaml` defines `device_tracker.stephen_location` (Duo
+`device_tracker.stephen_s_iphone_fenton` + 18 Pro `device_tracker.iphone_fenton`, both S+H) and
+`device_tracker.stephanie_location` (`device_tracker.stephanies_iphone`) with `require_movement: true`. Nothing else in
+`/config` YAML mentions them (checked 2026-11-02; UI-built dashboards and automations in `.storage` were not).
+
+Two facts decide the order. A UI entry's entity id comes from its name, and the YAML entries own the ids until they are
+removed. And when an entity leaves the registry, Home Assistant's `person` removes it from every person's trackers.
+So the persons are un-bound for a few minutes in the middle; do it when both are at home or both away, and expect
+`person.*` to show `unknown` meanwhile.
+
+1. Install 1.2.0 and restart. Leave presence off, or on with dry run, and read the log: with YAML composites a dry run
+   reports "managed by YAML" if anything differs and otherwise says nothing. Turn dry run off only after step 5.
+2. Back up: `cp /config/packages/presence_composite.yaml /config/packages/presence_composite.yaml.yaml-to-ui-<date>.bak`.
+3. Remove the `composite:` block from the package file and leave only a comment saying the composites are UI entries
+   owned by S+H Home Integration (or delete the file). `ha core check`, then call `composite.reload` (no restart): the two
+   "from configuration" entries, their entities and the battery and speed sensors are removed, and both persons lose
+   their composite tracker.
+4. Settings, Devices & services, Composite, Add entry, twice. Name exactly `Stephen Location` and `Stephanie Location`
+   (the removed entries' names are free again). Inputs: Stephen
+   `device_tracker.stephen_s_iphone_fenton` and `device_tracker.iphone_fenton`; Stephanie `device_tracker.stephanies_iphone`.
+   Require movement on, the other options off, no picture. Check the new entities are `device_tracker.stephen_location`
+   and `device_tracker.stephanie_location`; if Home Assistant added a `_2`, rename in the entity settings. The battery
+   and speed sensors are named from the entry title and should land on `sensor.stephen_location_battery_level` and
+   `..._speed`; check them the same way.
+5. Settings, People: set each person's tracker to its composite alone (Stephen: `device_tracker.stephen_location`; Stephanie:
+   `device_tracker.stephanie_location`). Check `person.stephen_fenton` and `person.stephanie_hobart` have a state again.
+6. In the integration's options turn **Presence auto-enrolment** on (dry run still on), read the log for "would change"
+   lines (the expected result is none), then turn dry run off.
+7. Rollback: delete the two UI entries and restore the `.bak` package file, call `composite.reload`, re-bind the persons.
+   Presence is a report only while a composite is YAML, so it never fights the file.
+
+No restart is needed for 2 to 6; the restart in step 1 only installs 1.2.0. Ask before any restart.

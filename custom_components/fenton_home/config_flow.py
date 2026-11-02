@@ -9,6 +9,8 @@ from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResu
 from homeassistant.core import callback
 from homeassistant.helpers.selector import (
     BooleanSelector,
+    EntitySelector,
+    EntitySelectorConfig,
     SelectOptionDict,
     SelectSelector,
     SelectSelectorConfig,
@@ -28,10 +30,14 @@ from .const import (
     CONF_LIVE_JOBS,
     CONF_LIVE_JOBS_ENABLED,
     CONF_PERSON_NOTIFY,
+    CONF_PRESENCE_DRY_RUN,
+    CONF_PRESENCE_ENABLED,
+    CONF_PRESENCE_EXCLUDE,
     CONF_PUSH_BASE_URL,
     CONF_SWEEP_MODE,
     CONF_TEAM_ID,
     DEFAULT_BUNDLE_ID,
+    DEFAULT_PRESENCE_EXCLUDE,
     DEFAULT_SWEEP_MODE,
     DOMAIN,
     LEGACY_DOMAIN,
@@ -141,6 +147,9 @@ class FentonPushOptionsFlow(OptionsFlow):
                 CONF_PERSON_NOTIFY: (user_input.get(CONF_PERSON_NOTIFY) or DEFAULT_PERSON_NOTIFY).strip(),
                 CONF_SWEEP_MODE: user_input.get(CONF_SWEEP_MODE) if user_input.get(CONF_SWEEP_MODE) in SWEEP_MODES
                 else DEFAULT_SWEEP_MODE,
+                CONF_PRESENCE_ENABLED: bool(user_input.get(CONF_PRESENCE_ENABLED, False)),
+                CONF_PRESENCE_DRY_RUN: bool(user_input.get(CONF_PRESENCE_DRY_RUN, True)),
+                CONF_PRESENCE_EXCLUDE: list(user_input.get(CONF_PRESENCE_EXCLUDE) or []),
             })
         options = self.config_entry.options
         bundle = self.config_entry.data.get(CONF_BUNDLE_ID, DEFAULT_BUNDLE_ID)
@@ -163,5 +172,10 @@ class FentonPushOptionsFlow(OptionsFlow):
             vol.Optional(CONF_SWEEP_MODE, default=options.get(CONF_SWEEP_MODE, DEFAULT_SWEEP_MODE)): SelectSelector(
                 SelectSelectorConfig(options=list(SWEEP_MODES), translation_key=CONF_SWEEP_MODE,
                                      mode=SelectSelectorMode.DROPDOWN)),
+            vol.Optional(CONF_PRESENCE_ENABLED, default=options.get(CONF_PRESENCE_ENABLED, False)): BooleanSelector(),
+            vol.Optional(CONF_PRESENCE_DRY_RUN, default=options.get(CONF_PRESENCE_DRY_RUN, True)): BooleanSelector(),
+            vol.Optional(CONF_PRESENCE_EXCLUDE,
+                         default=options.get(CONF_PRESENCE_EXCLUDE, DEFAULT_PRESENCE_EXCLUDE)): EntitySelector(
+                EntitySelectorConfig(domain="device_tracker", multiple=True)),
         })
         return self.async_show_form(step_id="init", data_schema=schema)

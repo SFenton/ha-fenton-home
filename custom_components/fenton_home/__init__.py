@@ -44,6 +44,7 @@ from .legacy import (
 )
 from .live_jobs import LiveJobs
 from .payload import Timestamps
+from .presence import Presence, async_start_presence
 from .sweep import async_start_sweep
 from .views import DailyCounter, register_views
 
@@ -62,6 +63,8 @@ class PushRuntime:
     timestamps: Timestamps = field(default_factory=Timestamps)
     #: The job engine (``live_jobs.py``), started with the entry.
     live: LiveJobs | None = None
+    #: Presence auto-enrolment (``presence.py``), started with the entry.
+    presence: Presence | None = None
 
     @property
     def critical_alerts(self) -> bool:
@@ -139,6 +142,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(async_watch_registrations(hass, runtime))
     entry.async_on_unload(async_watch_removals(hass, runtime))
     entry.async_on_unload(async_start_sweep(hass, runtime))
+    entry.async_on_unload(async_start_presence(hass, runtime).stop)
     entry.async_on_unload(entry.add_update_listener(_options_updated))
     return True
 
@@ -149,6 +153,8 @@ async def _options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
         runtime.options = dict(entry.options)
         if runtime.live is not None:
             runtime.live.request()
+        if runtime.presence is not None:
+            runtime.presence.request(0)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
