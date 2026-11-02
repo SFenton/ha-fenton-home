@@ -129,7 +129,7 @@ So the persons are un-bound for a few minutes in the middle; do it when both are
 `person.*` to show `unknown` meanwhile.
 
 1. Install 1.2.0 and restart. Leave presence off, or on with dry run, and read the log: with YAML composites a dry run
-   reports "managed by YAML" if anything differs and otherwise says nothing. Turn dry run off only after step 5.
+   reports "managed by YAML" if anything differs and otherwise says nothing. Turn dry run off only in step 6.
 2. Back up: `cp /config/packages/presence_composite.yaml /config/packages/presence_composite.yaml.yaml-to-ui-<date>.bak`.
 3. Remove the `composite:` block from the package file and leave only a comment saying the composites are UI entries
    owned by S+H Home Integration (or delete the file). `ha core check`, then call `composite.reload` (no restart): the two
