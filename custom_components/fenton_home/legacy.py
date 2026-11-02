@@ -10,12 +10,16 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import TYPE_CHECKING, Any
+from pathlib import Path
 from urllib.parse import urlparse
 
 from homeassistant.config_entries import SOURCE_IMPORT, ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers import service as service_helper
+from homeassistant.util.yaml import load_yaml_dict
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.storage import Store
 
@@ -24,6 +28,7 @@ from .const import (
     DOMAIN,
     ISSUE_ALIASES_CAN_GO,
     ISSUE_LEGACY_SERVICE,
+    ISSUE_LEGACY_STILL_INSTALLED,
     LEGACY_DOMAIN,
     LEGACY_STORE_KEY,
     MOBILE_APP,
@@ -60,6 +65,21 @@ async def async_migrate_store(hass: HomeAssistant) -> bool:
     return copied
 
 
+def legacy_loaded(hass: HomeAssistant) -> bool:
+    """True while the old integration's files are still installed and its entry is running."""
+    return any(e.state is ConfigEntryState.LOADED for e in hass.config_entries.async_entries(LEGACY_DOMAIN))
+
+
+@callback
+def async_flag_still_installed(hass: HomeAssistant) -> None:
+    """Removing a loaded old entry would run its unload, which drops the shared ``notify.fenton_*`` services and the
+    alias service and leaves its routes answering 503. So nothing is imported until it is uninstalled."""
+    _LOGGER.warning("Fenton Home Push (%s) is still installed; remove it in HACS and restart before importing",
+                    LEGACY_DOMAIN)
+    ir.async_create_issue(hass, DOMAIN, ISSUE_LEGACY_STILL_INSTALLED, is_fixable=False,
+                          severity=ir.IssueSeverity.ERROR, translation_key=ISSUE_LEGACY_STILL_INSTALLED)
+
+
 async def async_import_legacy(hass: HomeAssistant) -> None:
     """Import every ``fenton_push`` config entry once, then remove it. Safe to run any number of times.
 
@@ -74,7 +94,12 @@ async def async_import_legacy(hass: HomeAssistant) -> None:
 async def _import_legacy(hass: HomeAssistant) -> None:
     old_entries = hass.config_entries.async_entries(LEGACY_DOMAIN)
     if not old_entries:
+        ir.async_delete_issue(hass, DOMAIN, ISSUE_LEGACY_STILL_INSTALLED)
         return
+    if legacy_loaded(hass):
+        async_flag_still_installed(hass)
+        return
+    ir.async_delete_issue(hass, DOMAIN, ISSUE_LEGACY_STILL_INSTALLED)
     await async_migrate_store(hass)
     for old in old_entries:
         unique_id = old.unique_id
@@ -100,6 +125,8 @@ def async_register_alias_service(hass: HomeAssistant, handler: Any, schema: Any)
     """``fenton_push.problem``: the same as ``fenton_home.problem``, plus a Repairs issue naming the new service."""
 
     async def _alias(call: ServiceCall) -> None:
+        # Something still calls the old name, so the old paths can't be said to be unused.
+        ir.async_delete_issue(hass, DOMAIN, ISSUE_ALIASES_CAN_GO)
         ir.async_create_issue(
             hass, DOMAIN, ISSUE_LEGACY_SERVICE, is_fixable=False, severity=ir.IssueSeverity.WARNING,
             translation_key=ISSUE_LEGACY_SERVICE,
@@ -107,6 +134,9 @@ def async_register_alias_service(hass: HomeAssistant, handler: Any, schema: Any)
         await handler(call)
 
     hass.services.async_register(LEGACY_DOMAIN, SERVICE_PROBLEM, _alias, schema=schema)
+    # The old domain has no services.yaml; describe the service so Home Assistant doesn't log that it can't load one.
+    description = load_yaml_dict(str(Path(__file__).parent / "services.yaml")).get(SERVICE_PROBLEM, {})
+    service_helper.async_set_service_schema(hass, LEGACY_DOMAIN, SERVICE_PROBLEM, description)
 
 
 def async_remove_alias_service(hass: HomeAssistant) -> None:
@@ -118,13 +148,14 @@ def registrations_moved(hass: HomeAssistant, bundle_id: str) -> bool:
     urls = [str((e.data.get("app_data") or {}).get("push_url") or "")
             for e in hass.config_entries.async_entries(MOBILE_APP) if e.data.get("app_id") == bundle_id]
     urls = [u for u in urls if u]
-    return bool(urls) and all(urlparse(u).path == API_PUSH for u in urls)
+    return bool(urls) and all(urlparse(u).path.endswith(API_PUSH) for u in urls)
 
 
 @callback
 def async_check_aliases(hass: HomeAssistant, bundle_id: str) -> None:
     """Raise or clear the "the old paths can go" issue from the registrations as they are now."""
-    if registrations_moved(hass, bundle_id):
+    if (registrations_moved(hass, bundle_id)
+            and ir.async_get(hass).async_get_issue(DOMAIN, ISSUE_LEGACY_SERVICE) is None):
         ir.async_create_issue(hass, DOMAIN, ISSUE_ALIASES_CAN_GO, is_fixable=False, severity=ir.IssueSeverity.WARNING,
                               translation_key=ISSUE_ALIASES_CAN_GO)
     else:

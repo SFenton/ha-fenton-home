@@ -19,6 +19,8 @@ without asking for them again, moves the live-job store, and removes the old ent
 `configuration.yaml` makes it do the same at startup.) The old `/api/fenton_push/...` paths and the `fenton_push.problem`
 service keep working for now; Repairs tells you when to switch an automation and when the old paths are unused.
 
+Don't open S+H on a phone between the restart and Add integration: until the entry is set up the config endpoint answers 404, and the app then clears its push details. If you did, open it again afterwards. If Fenton Home Push is still installed and running, the import refuses and Repairs asks you to remove it in HACS and restart.
+
 ## Sending
 
 Every Fenton Home device gets the usual `notify.mobile_app_<device>_fenton` service. On top of that:

@@ -20,6 +20,7 @@ from custom_components.fenton_home.const import (
     DOMAIN,
     ISSUE_ALIASES_CAN_GO,
     ISSUE_LEGACY_SERVICE,
+    ISSUE_LEGACY_STILL_INSTALLED,
 )
 from custom_components.fenton_home.legacy import async_import_legacy, async_migrate_store
 
@@ -239,3 +240,50 @@ async def test_no_repair_while_no_registration_has_a_push_url(hass: HomeAssistan
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     assert not can_go(hass)
+
+
+# -- review fixes -----------------------------------------------------------------------------------------------------
+
+
+async def test_import_refuses_while_the_old_integration_is_running(hass: HomeAssistant, hass_storage) -> None:
+    assert await async_setup_component(hass, "http", {})
+    old = old_entry(hass)
+    hass_storage["fenton_push.live_jobs"] = {"version": 1, "minor_version": 1, "key": "fenton_push.live_jobs",
+                                              "data": CARDS}
+    # Its files are still installed, so it is running.
+    object.__setattr__(old, "state", config_entries.ConfigEntryState.LOADED)
+    await async_import_legacy(hass)
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+    assert result["type"] is FlowResultType.ABORT and result["reason"] == "legacy_installed"
+    assert hass.config_entries.async_get_entry(old.entry_id) is old
+    assert not new_entries(hass) and "fenton_push.live_jobs" in hass_storage
+    assert ir.async_get(hass).async_get_issue(DOMAIN, ISSUE_LEGACY_STILL_INSTALLED) is not None
+    object.__setattr__(old, "state", config_entries.ConfigEntryState.NOT_LOADED)
+    # Once the old files are gone the import goes ahead and the issue clears.
+    await async_import_legacy(hass)
+    await hass.async_block_till_done()
+    assert len(new_entries(hass)) == 1 and hass.config_entries.async_get_entry(old.entry_id) is None
+    assert ir.async_get(hass).async_get_issue(DOMAIN, ISSUE_LEGACY_STILL_INSTALLED) is None
+
+
+async def test_alias_service_has_a_description(hass: HomeAssistant) -> None:
+    from custom_components.fenton_home.legacy import async_register_alias_service  # noqa: PLC0415
+
+    with patch("custom_components.fenton_home.legacy.service_helper.async_set_service_schema") as describe:
+        async_register_alias_service(hass, AsyncMock(), None)
+    domain, service, schema = describe.call_args.args[1:]
+    assert (domain, service) == ("fenton_push", "problem") and "device" in schema["fields"]
+
+
+async def test_repair_is_held_back_while_the_old_service_is_in_use_and_sees_path_prefixes(
+        hass: HomeAssistant, loaded) -> None:
+    assert can_go(hass)
+    await hass.services.async_call("fenton_push", "problem", {"device": "main_floor", "code": "navigation.stuck"},
+                                   blocking=True)
+    assert not can_go(hass)
+    ir.async_delete_issue(hass, DOMAIN, ISSUE_LEGACY_SERVICE)
+    hass.config_entries.async_update_entry(hass.config_entries.async_entries("mobile_app")[0], data={
+        **hass.config_entries.async_entries("mobile_app")[0].data,
+        "app_data": {"push_url": "https://ha.example.com/prefix/api/fenton_home/apns", "push_token": "t"}})
+    await hass.async_block_till_done()
+    assert can_go(hass)

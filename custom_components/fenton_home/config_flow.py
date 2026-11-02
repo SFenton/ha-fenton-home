@@ -35,7 +35,7 @@ from .const import (
     LEGACY_DOMAIN,
 )
 from .entities import DEFAULT_PERSON_NOTIFY, JOB_IDS, STYLES
-from .legacy import async_migrate_store
+from .legacy import async_flag_still_installed, async_migrate_store, legacy_loaded
 from .targets import live_devices
 
 KEY_SELECTOR = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD, multiline=False))
@@ -82,6 +82,9 @@ class FentonPushConfigFlow(ConfigFlow, domain=DOMAIN):
 
         The values are not checked with Apple again, and never logged.
         """
+        if legacy_loaded(self.hass):
+            async_flag_still_installed(self.hass)
+            return self.async_abort(reason="legacy_installed")
         data = dict(import_data["data"])
         await self.async_set_unique_id(import_data.get("unique_id") or data.get(CONF_BUNDLE_ID))
         self._abort_if_unique_id_configured()
@@ -92,6 +95,9 @@ class FentonPushConfigFlow(ConfigFlow, domain=DOMAIN):
         """Ask for the key and identifiers."""
         errors: dict[str, str] = {}
         if (old := self.hass.config_entries.async_entries(LEGACY_DOMAIN)) and user_input is None:
+            if legacy_loaded(self.hass):
+                async_flag_still_installed(self.hass)
+                return self.async_abort(reason="legacy_installed")
             # Adding the integration on a server that still has Fenton Home Push: take its key, ask for nothing.
             await async_migrate_store(self.hass)
             # The old entry is removed by ``async_setup_entry`` once this one exists.
