@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from fenton_push.payload import DYNAMIC_CATEGORY, MAX_PAYLOAD_BYTES, PayloadError, build, collapse_id
+from fenton_home.payload import DYNAMIC_CATEGORY, MAX_PAYLOAD_BYTES, PayloadError, build, collapse_id
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import live2_samples  # noqa: E402

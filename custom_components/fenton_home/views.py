@@ -1,7 +1,9 @@
 """HTTP endpoints.
 
-- ``GET /api/fenton_push/config`` (Home Assistant access token): tells the app which ``push_url`` to register.
-- ``POST /api/fenton_push/apns`` (no token): the ``push_url`` itself. ``mobile_app`` posts here without
+The pre-1.0 paths ``/api/fenton_push/config`` and ``/api/fenton_push/apns`` are aliases on the same handlers.
+
+- ``GET /api/fenton_home/config`` (Home Assistant access token): tells the app which ``push_url`` to register.
+- ``POST /api/fenton_home/apns`` (no token): the ``push_url`` itself. ``mobile_app`` posts here without
   credentials, so a request is only honoured when its webhook id and push token match a real Fenton Home
   registration; both are secrets Home Assistant and the app share.
 
@@ -26,7 +28,7 @@ from homeassistant.helpers.network import NoURLAvailableError, get_url
 
 from . import recovery
 from .apns import ENVIRONMENTS, APNsError
-from .const import API_CONFIG, API_PUSH, APP_DATA_ENVIRONMENT, CONF_PUSH_BASE_URL, DAILY_LIMIT, DOMAIN
+from .const import API_CONFIG, API_PUSH, LEGACY_API_CONFIG, LEGACY_API_PUSH, APP_DATA_ENVIRONMENT, CONF_PUSH_BASE_URL, DAILY_LIMIT, DOMAIN
 from .payload import PayloadError, build
 from .targets import registration
 
@@ -95,7 +97,9 @@ class ConfigView(HomeAssistantView):
     """What the app needs before it registers."""
 
     url = API_CONFIG
-    name = "api:fenton_push:config"
+    #: The pre-1.0 path, served by the same handler while registrations and the app move.
+    extra_urls = [LEGACY_API_CONFIG]
+    name = "api:fenton_home:config"
 
     async def get(self, request: web.Request) -> web.Response:
         hass = request.app[KEY_HASS]
@@ -110,14 +114,15 @@ class PushView(HomeAssistantView):
     """Receives ``mobile_app``'s push posts and forwards them to Apple."""
 
     url = API_PUSH
-    name = "api:fenton_push:apns"
+    extra_urls = [LEGACY_API_PUSH]
+    name = "api:fenton_home:apns"
     requires_auth = False
 
     async def post(self, request: web.Request) -> web.Response:
         hass = request.app[KEY_HASS]
         runtime = _runtime(hass)
         if runtime is None:
-            return _message("Fenton Home Push isn't set up", HTTPStatus.SERVICE_UNAVAILABLE)
+            return _message("S+H Home Integration isn't set up", HTTPStatus.SERVICE_UNAVAILABLE)
         try:
             body: Any = await request.json()
         except ValueError:
@@ -215,7 +220,7 @@ class PushView(HomeAssistantView):
             return _message(f"Apple no longer accepts {name}'s push token ({err.reason}); open Fenton Home on it "
                             "to refresh it", HTTPStatus.GONE)
         if err.bad_credentials:
-            _LOGGER.error("Apple rejected the Fenton Home Push key (%s); reconfigure the integration", err.reason)
+            _LOGGER.error("Apple rejected the S+H Home Integration key (%s); reconfigure the integration", err.reason)
             return _message(f"Apple rejected the push key ({err.reason})", HTTPStatus.BAD_GATEWAY)
         if err.status == 0:
             return _message(f"Couldn't reach Apple ({err.reason})", HTTPStatus.BAD_GATEWAY)

@@ -247,10 +247,10 @@ class Engine:
         text_ = raw or code
         if text_ not in self._unmapped_logged:
             self._unmapped_logged.add(text_)
-            _LOGGER.warning("fenton_push.problem_unmapped: %r (code %s)", text_, code)
+            _LOGGER.warning("fenton_home.problem_unmapped: %r (code %s)", text_, code)
 
     def raise_problem(self, job_id: str, code: str, raw: str | None, now: float, **fields: Any) -> ProblemRecord:
-        """Open or update the service-raised problem on a device (``fenton_push.problem``)."""
+        """Open or update the service-raised problem on a device (``fenton_home.problem``)."""
         self.suppressed.pop(job_id, None)
         record = self.records.get(job_id)
         if record is None or record.code != code:

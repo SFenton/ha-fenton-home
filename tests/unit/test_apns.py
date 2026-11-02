@@ -8,7 +8,7 @@ import jwt
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
-from fenton_push.apns import (
+from fenton_home.apns import (
     PROBE_DEVICE_TOKEN,
     SANDBOX_HOST,
     TOKEN_LIFETIME_SECONDS,
@@ -17,7 +17,7 @@ from fenton_push.apns import (
     Credentials,
     load_key,
 )
-from fenton_push.payload import ApnsRequest
+from fenton_home.payload import ApnsRequest
 
 
 def pem(key) -> str:

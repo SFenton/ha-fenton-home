@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fenton_push.slots import Candidate, Coalescer, allocate
+from fenton_home.slots import Candidate, Coalescer, allocate
 
 
 def job(tag: str, relevance: float = 55, since: float = 0) -> Candidate:

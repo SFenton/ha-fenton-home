@@ -11,15 +11,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from homeassistant.core import HomeAssistant
 
-from custom_components.fenton_push import recovery
-from custom_components.fenton_push.apns import APNsError
+from custom_components.fenton_home import recovery
+from custom_components.fenton_home.apns import APNsError
 
 from .. import samples
 from .test_integration import CLIENT, body
 from .test_integration import configured as configured  # noqa: F401  (a fixture, used by name)
 
 START_TOKEN = "d" * 64
-REMOVE = "custom_components.fenton_push.views.recovery.remove_token"
+REMOVE = "custom_components.fenton_home.views.recovery.remove_token"
 
 
 @pytest.fixture
@@ -36,7 +36,7 @@ def update_body() -> dict:
 
 
 async def post(client, payload: dict):
-    return await client.post("/api/fenton_push/apns", json=payload)
+    return await client.post("/api/fenton_home/apns", json=payload)
 
 
 async def test_a_dead_update_token_is_removed_and_the_card_starts_again(hass, device, hass_client_no_auth) -> None:

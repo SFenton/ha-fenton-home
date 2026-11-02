@@ -9,9 +9,9 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from fenton_push.engine import Engine, End, Push, Registration
-from fenton_push.jobs import Ctx
-from fenton_push.snapshot import States
+from fenton_home.engine import Engine, End, Push, Registration
+from fenton_home.jobs import Ctx
+from fenton_home.snapshot import States
 
 NOW = 1_792_249_200
 STEPHEN, STEPHANIE = "person.stephen_fenton", "person.stephanie_hobart"
@@ -32,7 +32,7 @@ def iso(moment: float) -> str:
 
 
 def ctx(**kwargs: Any) -> Ctx:
-    from fenton_push.model import PersonRef  # noqa: PLC0415
+    from fenton_home.model import PersonRef  # noqa: PLC0415
 
     people = (PersonRef(STEPHEN, USER_STEPHEN, "Stephen Fenton"), PersonRef(STEPHANIE, USER_STEPHANIE, "Stephanie Hobart"))
     return Ctx(tz=UTC, people=people, **kwargs)

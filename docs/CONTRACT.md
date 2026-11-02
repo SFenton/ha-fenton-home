@@ -1,14 +1,23 @@
-# Fenton Home Push: app contract (v1; Live Activities v2, sections 6 and 7)
+# S+H Home Integration: app contract (v2; Live Activities v2, sections 6 and 7)
 
-How the Fenton Home iOS app (bundle `com.sfenton.home`) and this integration talk. Home Assistant's own
+How the S+H iOS app (bundle `com.sfenton.home`) and this integration talk. Home Assistant's own
 `mobile_app` integration sits in the middle and is used unchanged.
+
+**v2 (integration 1.0.0)** renames the integration from Fenton Home Push (`fenton_push`) to the S+H Home Integration
+(`fenton_home`). Nothing else changes on the wire. The paths are now `/api/fenton_home/config` and
+`/api/fenton_home/apns`, and the service is `fenton_home.problem`. **v1 paths stay valid** (`/api/fenton_push/config`,
+`/api/fenton_push/apns`, `fenton_push.problem`) while the integration keeps its aliases: they answer on the same
+handlers, `push_url` in the config answer is always the new path, and a Repairs issue tells the owner when every
+registration has moved (and when something still calls `fenton_push.problem`). An app that gets a 404 from the new
+config path should ask the old one. The notify action `notify.fenton_<person>` and the `fenton_live_activity_*`
+events are unchanged.
 
 ## 1. Ask the integration where to point pushes
 
-`GET /api/fenton_push/config` (Home Assistant access token) →
+`GET /api/fenton_home/config` (Home Assistant access token) →
 
 ```json
-{"available": true, "push_url": "http://192.168.1.20:8123/api/fenton_push/apns", "bundle_id": "com.sfenton.home", "critical_alerts": false}
+{"available": true, "push_url": "http://192.168.1.20:8123/api/fenton_home/apns", "bundle_id": "com.sfenton.home", "critical_alerts": false}
 ```
 
 A 404 means the integration isn't installed: the app still registers, without `push_url`/`push_token` (websocket
@@ -149,7 +158,7 @@ sent and the daily count does not move. Without this the post would arrive as a 
 
 ### Content
 
-`data.fenton_activity` (the automation's block, or what the `fenton_push` job engine will build) becomes the activity's
+`data.fenton_activity` (the automation's block, or what the `fenton_home` job engine will build) becomes the activity's
 `content-state`, and is validated against the app's `HomeActivityState`:
 
 ```json
@@ -208,7 +217,7 @@ supersedes the aggregate Home activity of section 6. The transport in section 6 
 `live_activity_token` and `data.event`); what changes is the content, the attributes and the stamping. The Home
 activity's content state (v1) is still accepted for one release.
 
-The `fenton_push` job engine (`live_jobs.py`) sends one activity per job through core's
+The `fenton_home` job engine (`live_jobs.py`) sends one activity per job through core's
 `notify.mobile_app_<device>` with `data: {tag: "job.<id>", live_update: true, fenton_activity: {...}, fenton_attributes: {...},
 relevance_score, live_alert?, urgent?}`. Core owns the tokens and chooses start, update or end; this integration maps the
 result as follows.
@@ -290,4 +299,4 @@ push the relay:
 |---|---|---|
 | `fenton_live_activity_action` | phone to engine (registration webhook `fire_event`) | `{tag, job, control}`; the event's user comes from the registration |
 | `fenton_live_activity_dismissed` | phone to engine | `{tag}`; a webhook id is a credential and events are recorded, so none is sent. With several devices showing the tag the engine narrows to the one whose token core just dropped |
-| `fenton_push.problem` | automation to engine | `{device, code?, raw?, title?, message?, task_title?, url?, tag?, data?}` |
+| `fenton_home.problem` | automation to engine | `{device, code?, raw?, title?, message?, task_title?, url?, tag?, data?}` |

@@ -70,7 +70,7 @@ CLEAR = {
 #: The instant the live fixtures are built at (2026-10-17 15:00:00 UTC), so ``tests/fixtures/live-*.apns`` are stable.
 FIXTURE_NOW = 1_792_249_200
 
-#: What the ``fenton_push.set_live_job`` engine will put in ``data.fenton_activity`` (Phase 2); the automations of
+#: What the ``fenton_home.set_live_job`` engine will put in ``data.fenton_activity`` (Phase 2); the automations of
 #: Phase 1 can send the same block by hand.
 HOME_ACTIVITY = {
     "focus": "dishwasher",

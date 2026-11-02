@@ -1,4 +1,4 @@
-"""Fenton Home Push: delivers Home Assistant notifications to the Fenton Home app through Apple Push.
+"""S+H Home Integration: the S+H app's server half. Delivers Home Assistant notifications to the app through Apple Push.
 
 The app registers as an ordinary ``mobile_app`` device whose ``push_url`` is this integration
 (``views.PushView``), so every existing notify target, group and button handler works with it. The APNs key
@@ -19,6 +19,7 @@ from homeassistant.core import CoreState, Event, HomeAssistant, ServiceCall
 from homeassistant.exceptions import ConfigEntryError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import discovery
+from homeassistant.helpers.typing import ConfigType
 from homeassistant.helpers.httpx_client import create_async_httpx_client
 from homeassistant.util.ssl import SSL_ALPN_HTTP11_HTTP2
 
@@ -33,6 +34,12 @@ from .const import (
     DOMAIN,
     NOTIFY_SERVICE_NAME,
     SERVICE_PROBLEM,
+)
+from .legacy import (
+    async_import_legacy,
+    async_register_alias_service,
+    async_remove_alias_service,
+    async_watch_registrations,
 )
 from .live_jobs import LiveJobs
 from .payload import Timestamps
@@ -83,6 +90,16 @@ def http_client(hass: HomeAssistant) -> Any:
     return create_async_httpx_client(hass, alpn_protocols=SSL_ALPN_HTTP11_HTTP2)
 
 
+CONFIG_SCHEMA = cv.empty_config_schema(DOMAIN)
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Import a leftover ``fenton_push`` entry. A background task: the import flow sets the new entry up, which waits
+    for this setup to finish."""
+    hass.async_create_task(async_import_legacy(hass))
+    return True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Start forwarding pushes and register the person targets."""
     try:
@@ -114,6 +131,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             await live.async_problem(dict(call.data))
 
     hass.services.async_register(DOMAIN, SERVICE_PROBLEM, _problem, schema=PROBLEM_SCHEMA)
+    async_register_alias_service(hass, _problem, PROBLEM_SCHEMA)
+    # A leftover fenton_push entry (the user step copied its key): remove it now that this one exists.
+    hass.async_create_task(async_import_legacy(hass))
+    entry.async_on_unload(async_watch_registrations(hass, runtime))
     entry.async_on_unload(entry.add_update_listener(_options_updated))
     return True
 
@@ -132,6 +153,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if runtime is not None and runtime.live is not None:
         await runtime.live.async_stop()
     hass.services.async_remove(DOMAIN, SERVICE_PROBLEM)
+    async_remove_alias_service(hass)
     try:
         from homeassistant.components.notify.legacy import NOTIFY_SERVICES  # noqa: PLC0415
     except ImportError:  # pragma: no cover - layout changed upstream

@@ -17,9 +17,9 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.fenton_push.apns import APNsError
-from custom_components.fenton_push.entities import JOB_IDS
-from custom_components.fenton_push.const import (
+from custom_components.fenton_home.apns import APNsError
+from custom_components.fenton_home.entities import JOB_IDS
+from custom_components.fenton_home.const import (
     CONF_BUNDLE_ID,
     CONF_CRITICAL_ALERTS,
     CONF_KEY,
@@ -31,7 +31,7 @@ from custom_components.fenton_push.const import (
 
 from .. import samples
 
-CLIENT = "custom_components.fenton_push.apns.APNsClient"
+CLIENT = "custom_components.fenton_home.apns.APNsClient"
 PEM = ec.generate_private_key(ec.SECP256R1()).private_bytes(
     serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()).decode()
 DATA = {CONF_KEY: PEM, CONF_KEY_ID: "ABC123DEFG", CONF_TEAM_ID: "TEAM123456", CONF_BUNDLE_ID: "com.sfenton.home"}
@@ -54,14 +54,14 @@ async def test_flow_checks_the_key_with_apple(hass: HomeAssistant) -> None:
     # A PEM pasted into the one-line field loses its line breaks; it is rebuilt.
     flattened = " ".join(PEM.split("\n"))
     with patch(f"{CLIENT}.verify", AsyncMock(return_value=None)), \
-         patch("custom_components.fenton_push.async_setup_entry", AsyncMock(return_value=True)):
+         patch("custom_components.fenton_home.async_setup_entry", AsyncMock(return_value=True)):
         result = await hass.config_entries.flow.async_configure(result["flow_id"], {**form, CONF_KEY: flattened})
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["title"] == "com.sfenton.home (key ABC123DEFG)"
     assert result["data"] == {**DATA, CONF_KEY: PEM.strip()}
 
 
-PUSH_URL = "http://127.0.0.1:8123/api/fenton_push/apns"
+PUSH_URL = "http://127.0.0.1:8123/api/fenton_home/apns"
 
 
 class MobileAppStandIn(BaseNotificationService):
@@ -148,20 +148,20 @@ def body(webhook_id: str = "hook-stephen-iphone", token: str | None = None, samp
 
 async def test_config_endpoint(hass: HomeAssistant, configured, hass_client) -> None:
     client = await hass_client()
-    answer = await (await client.get("/api/fenton_push/config")).json()
+    answer = await (await client.get("/api/fenton_home/config")).json()
     assert answer["available"] is True and answer["bundle_id"] == "com.sfenton.home"
-    assert answer["push_url"].endswith("/api/fenton_push/apns") and answer["critical_alerts"] is False
+    assert answer["push_url"].endswith("/api/fenton_home/apns") and answer["critical_alerts"] is False
     hass.config_entries.async_update_entry(configured, options={CONF_PUSH_BASE_URL: "http://10.0.0.5:8123/",
                                                                 CONF_CRITICAL_ALERTS: True})
     await hass.async_block_till_done()
-    answer = await (await client.get("/api/fenton_push/config")).json()
-    assert answer["push_url"] == "http://10.0.0.5:8123/api/fenton_push/apns" and answer["critical_alerts"] is True
+    answer = await (await client.get("/api/fenton_home/config")).json()
+    assert answer["push_url"] == "http://10.0.0.5:8123/api/fenton_home/apns" and answer["critical_alerts"] is True
 
 
 async def test_push_forwards_to_apple(hass: HomeAssistant, configured, hass_client_no_auth) -> None:
     client = await hass_client_no_auth()
     with patch(f"{CLIENT}.send", AsyncMock(return_value=None)) as send:
-        response = await client.post("/api/fenton_push/apns", json=body())
+        response = await client.post("/api/fenton_home/apns", json=body())
     assert response.status == HTTPStatus.CREATED
     limits = (await response.json())["rateLimits"]
     assert limits["successful"] == 1 and limits["maximum"] == 1000
@@ -174,7 +174,7 @@ async def test_live_activity_goes_to_the_activity_token_and_a_tokenless_update_i
         hass: HomeAssistant, configured, hass_client_no_auth) -> None:
     client = await hass_client_no_auth()
     with patch(f"{CLIENT}.send", AsyncMock(return_value=None)) as send:
-        response = await client.post("/api/fenton_push/apns", json=body(sample=samples.LIVE_START))
+        response = await client.post("/api/fenton_home/apns", json=body(sample=samples.LIVE_START))
         assert response.status == HTTPStatus.CREATED
         token, request, _ = send.await_args.args
         assert token == "b" * 64, "a Live Activity goes to the token mobile_app resolved, not the device token"
@@ -184,7 +184,7 @@ async def test_live_activity_goes_to_the_activity_token_and_a_tokenless_update_i
         # ordinary one, and Fenton Push must not show it as a banner.
         tokenless = {k: v for k, v in samples.LIVE_UPDATE.items() if k != "live_activity_token"}
         send.reset_mock()
-        dropped = await client.post("/api/fenton_push/apns", json=body(sample=tokenless))
+        dropped = await client.post("/api/fenton_home/apns", json=body(sample=tokenless))
         assert dropped.status == HTTPStatus.CREATED
         send.assert_not_awaited()
         assert (await dropped.json())["rateLimits"]["successful"] == 1, "a drop is not a push"
@@ -195,33 +195,33 @@ async def test_push_refuses_strangers(hass: HomeAssistant, configured, hass_clie
     with patch(f"{CLIENT}.send", AsyncMock(return_value=None)) as send:
         for refused in (body(token="wrong"), body("hook-nobody"), body("hook-companion"),
                         body("hook-stephen-signed-out", token="tok-hook-stephen-signed-out")):
-            assert (await client.post("/api/fenton_push/apns", json=refused)).status == HTTPStatus.FORBIDDEN
-        assert (await client.post("/api/fenton_push/apns", data=b"nope")).status == HTTPStatus.BAD_REQUEST
-        assert (await client.post("/api/fenton_push/apns", json=[1])).status == HTTPStatus.BAD_REQUEST
+            assert (await client.post("/api/fenton_home/apns", json=refused)).status == HTTPStatus.FORBIDDEN
+        assert (await client.post("/api/fenton_home/apns", data=b"nope")).status == HTTPStatus.BAD_REQUEST
+        assert (await client.post("/api/fenton_home/apns", json=[1])).status == HTTPStatus.BAD_REQUEST
     send.assert_not_awaited()
 
 
 async def test_push_reports_apple_failures(hass: HomeAssistant, configured, hass_client_no_auth) -> None:
     client = await hass_client_no_auth()
     with patch(f"{CLIENT}.send", AsyncMock(side_effect=APNsError(410, "Unregistered"))):
-        assert (await client.post("/api/fenton_push/apns", json=body())).status == HTTPStatus.GONE
+        assert (await client.post("/api/fenton_home/apns", json=body())).status == HTTPStatus.GONE
     with patch(f"{CLIENT}.send", AsyncMock(side_effect=APNsError(403, "InvalidProviderToken"))):
-        assert (await client.post("/api/fenton_push/apns", json=body())).status == HTTPStatus.BAD_GATEWAY
+        assert (await client.post("/api/fenton_home/apns", json=body())).status == HTTPStatus.BAD_GATEWAY
     # A token from the other environment is retried there once.
     with patch(f"{CLIENT}.send", AsyncMock(side_effect=[APNsError(400, "BadDeviceToken"), None])) as send:
-        assert (await client.post("/api/fenton_push/apns", json=body())).status == HTTPStatus.CREATED
+        assert (await client.post("/api/fenton_home/apns", json=body())).status == HTTPStatus.CREATED
     assert [call.args[2] for call in send.await_args_list] == ["sandbox", "production"]
     bad = body()
     bad["message"] = "y" * 5000
-    assert (await client.post("/api/fenton_push/apns", json=bad)).status == HTTPStatus.BAD_REQUEST
+    assert (await client.post("/api/fenton_home/apns", json=bad)).status == HTTPStatus.BAD_REQUEST
 
 
 async def test_daily_limit(hass: HomeAssistant, configured, hass_client_no_auth) -> None:
     hass.data[DOMAIN][configured.entry_id].counter.limit = 1
     client = await hass_client_no_auth()
     with patch(f"{CLIENT}.send", AsyncMock(return_value=None)):
-        assert (await client.post("/api/fenton_push/apns", json=body())).status == HTTPStatus.CREATED
-        limited = await client.post("/api/fenton_push/apns", json=body())
+        assert (await client.post("/api/fenton_home/apns", json=body())).status == HTTPStatus.CREATED
+        limited = await client.post("/api/fenton_home/apns", json=body())
     assert limited.status == HTTPStatus.TOO_MANY_REQUESTS
     assert "rateLimits" in await limited.json()
 
@@ -306,7 +306,7 @@ async def test_a_device_mobile_app_doesnt_know_is_skipped(hass: HomeAssistant, c
 
 async def test_without_the_service_object_the_name_action_is_the_fallback(hass: HomeAssistant, configured, monkeypatch,
                                                                          caplog) -> None:
-    monkeypatch.setattr("custom_components.fenton_push.notify.NOTIFY_SERVICES", None)
+    monkeypatch.setattr("custom_components.fenton_home.notify.NOTIFY_SERVICES", None)
     await hass.services.async_call("notify", "fenton_stephen", {"message": "Hi", "title": "T"}, blocking=True)
     service = mobile_app(hass)
     assert reached(service) == ["hook-stephen-iphone", "hook-stephen-ipad"]
@@ -314,7 +314,7 @@ async def test_without_the_service_object_the_name_action_is_the_fallback(hass: 
 
 
 async def test_the_fallback_logs_a_device_with_no_action(hass: HomeAssistant, configured, monkeypatch, caplog) -> None:
-    monkeypatch.setattr("custom_components.fenton_push.notify.NOTIFY_SERVICES", None)
+    monkeypatch.setattr("custom_components.fenton_home.notify.NOTIFY_SERVICES", None)
     mobile_app_entry(hass, "hook-stephen-unnamed", STEPHEN)  # its action isn't registered yet
     await hass.services.async_call("notify", "fenton_stephen", {"message": "Hi"}, blocking=True)
     assert reached(mobile_app(hass)) == ["hook-stephen-iphone", "hook-stephen-ipad"]
@@ -326,7 +326,7 @@ async def test_unload(hass: HomeAssistant, configured, hass_client_no_auth) -> N
     await hass.async_block_till_done()
     assert not hass.services.has_service("notify", "fenton_stephen")
     client = await hass_client_no_auth()
-    assert (await client.post("/api/fenton_push/apns", json=body())).status == HTTPStatus.SERVICE_UNAVAILABLE
+    assert (await client.post("/api/fenton_home/apns", json=body())).status == HTTPStatus.SERVICE_UNAVAILABLE
 
 
 async def test_options_flow(hass: HomeAssistant, configured) -> None:

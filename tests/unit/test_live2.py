@@ -8,8 +8,8 @@ import sys
 from pathlib import Path
 
 import pytest
-from fenton_push.live import ended_state_v2, state_v2
-from fenton_push.payload import MAX_PAYLOAD_BYTES, PayloadError, Timestamps, build
+from fenton_home.live import ended_state_v2, state_v2
+from fenton_home.payload import MAX_PAYLOAD_BYTES, PayloadError, Timestamps, build
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import live2_samples  # noqa: E402

@@ -127,7 +127,7 @@ class FentonNotificationService(BaseNotificationService):
     async def async_send_message(self, message: str = "", **kwargs: Any) -> None:
         bundle_id = self._bundle_id()
         if bundle_id is None:
-            _LOGGER.warning("Fenton Home Push isn't loaded; notification dropped")
+            _LOGGER.warning("S+H Home Integration isn't loaded; notification dropped")
             return
         data = kwargs.get(ATTR_DATA)
         kinds = _kinds(data)

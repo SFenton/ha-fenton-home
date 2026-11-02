@@ -1,4 +1,4 @@
-# Fenton Home Push
+# S+H Home Integration
 
 A Home Assistant integration that delivers notifications to the **Fenton Home** iOS app through Apple Push, with targets that follow the person who is signed in.
 
@@ -6,10 +6,20 @@ The app registers as an ordinary Home Assistant mobile device. Its push address 
 
 ## Install
 
-1. HACS → Integrations → ⋮ → Custom repositories → add `https://github.com/SFenton/ha-fenton-push` (category Integration), then download **Fenton Home Push** and restart Home Assistant.
+1. HACS → Integrations → ⋮ → Custom repositories → add `https://github.com/SFenton/ha-fenton-home` (category Integration), then download **S+H Home Integration** and restart Home Assistant.
 2. In your Apple Developer account, open Certificates, Identifiers & Profiles → Keys, create a key with **Apple Push Notifications service** enabled and download the `.p8` file (Apple only lets you download it once). Note its Key ID and your Team ID.
-3. Settings → Devices & services → Add integration → **Fenton Home Push**. Paste the whole `.p8` file, the Key ID and the Team ID. Apple checks the key before it is saved.
+3. Settings → Devices & services → Add integration → **S+H Home Integration**. Paste the whole `.p8` file, the Key ID and the Team ID. Apple checks the key before it is saved.
 4. Open Fenton Home and allow notifications. The app registers itself; a new device appears under Mobile App named `<device> · Fenton`.
+
+## Upgrading from Fenton Home Push (`fenton_push`)
+
+The integration was renamed in 1.0.0; its domain is now `fenton_home`. Install it from HACS, remove Fenton Home Push,
+restart, then add **S+H Home Integration** under Devices & services: it takes the old entry's APNs key and options
+without asking for them again, moves the live-job store, and removes the old entry. (A `fenton_home:` line in
+`configuration.yaml` makes it do the same at startup.) The old `/api/fenton_push/...` paths and the `fenton_push.problem`
+service keep working for now; Repairs tells you when to switch an automation and when the old paths are unused.
+
+Don't open S+H on a phone between the restart and Add integration: until the entry is set up the config endpoint answers 404, and the app then clears its push details. If you did, open it again afterwards. If Fenton Home Push is still installed and running, the import refuses and Repairs asks you to remove it in HACS and restart.
 
 ## Sending
 
@@ -69,15 +79,15 @@ minutes. The design and every rule is in `Fenton-HASS-Native/.agents/platforms/a
 `docs/CONTRACT.md` section 7 is the wire contract.
 
 `sensor.fenton_live_jobs` lists what each device is showing, for debugging. The job entities and service mappings the
-engine reads are in `custom_components/fenton_push/entities.py` and `controls.py`.
+engine reads are in `custom_components/fenton_home/entities.py` and `controls.py`.
 
-### Problem cards: `fenton_push.problem`
+### Problem cards: `fenton_home.problem`
 
 A device problem (a robot that is stuck, a dishwasher that needs attention) is a card too, and replaces the ordinary
 notification for people who have the app. Call the service where the notification used to be sent:
 
 ```yaml
-action: fenton_push.problem
+action: fenton_home.problem
 data:
   device: main_floor                      # main_floor, music_room, theater_room or dishwasher
   code: navigation.stuck                  # or raw: "Unknown error 12" to map the robot's own text
@@ -104,8 +114,8 @@ button, and the notification is cleared when it ends. A problem with no task end
 
 `docs/CONTRACT.md` is the wire contract with the app. In short:
 
-- `GET /api/fenton_push/config` (access token) tells the app which `push_url` to register.
-- `POST /api/fenton_push/apns` is that `push_url`. Home Assistant's `mobile_app` posts each notification there without credentials, so a request is honoured only when its webhook id and push token match a real Fenton Home registration. It maps the notification to an APNs payload (`payload.py`) and sends it over HTTP/2 with a token signed by your key (`apns.py`).
+- `GET /api/fenton_home/config` (access token) tells the app which `push_url` to register.
+- `POST /api/fenton_home/apns` is that `push_url`. Home Assistant's `mobile_app` posts each notification there without credentials, so a request is honoured only when its webhook id and push token match a real Fenton Home registration. It maps the notification to an APNs payload (`payload.py`) and sends it over HTTP/2 with a token signed by your key (`apns.py`).
 - A device gets at most 1,000 pushes per UTC day, as a guard against runaway automations.
 - Apple tokens from Xcode builds use the sandbox service and TestFlight builds use production; the app says which, and a token from the other environment is retried there once.
 

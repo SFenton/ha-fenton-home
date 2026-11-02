@@ -1,8 +1,8 @@
-"""Constants for Fenton Home Push."""
+"""Constants for S+H Home Integration."""
 
 from __future__ import annotations
 
-DOMAIN = "fenton_push"
+DOMAIN = "fenton_home"
 
 CONF_KEY = "key"
 CONF_KEY_ID = "key_id"
@@ -33,8 +33,19 @@ TARGET_EVERYONE = "everyone"
 #: Pushes per device per UTC day, a guard against runaway automations (Apple sets no fixed cap).
 DAILY_LIMIT = 1000
 
-API_CONFIG = "/api/fenton_push/config"
-API_PUSH = "/api/fenton_push/apns"
+API_CONFIG = "/api/fenton_home/config"
+API_PUSH = "/api/fenton_home/apns"
+
+#: The names this integration had before 1.0 (Fenton Home Push). The paths and the problem service stay as aliases
+#: while registrations and automations move; the config entry and the store are imported once (``legacy.py``).
+LEGACY_DOMAIN = "fenton_push"
+LEGACY_API_CONFIG = "/api/fenton_push/config"
+LEGACY_API_PUSH = "/api/fenton_push/apns"
+LEGACY_STORE_KEY = "fenton_push.live_jobs"
+
+#: Repairs issue ids.
+ISSUE_LEGACY_SERVICE = "legacy_problem_service"
+ISSUE_ALIASES_CAN_GO = "legacy_paths_unused"
 
 MOBILE_APP = "mobile_app"
 
@@ -43,3 +54,4 @@ SERVICE_PROBLEM = "problem"
 EVENT_ACTION = "fenton_live_activity_action"
 EVENT_DISMISSED = "fenton_live_activity_dismissed"
 SENSOR_JOBS = "sensor.fenton_live_jobs"
+ISSUE_LEGACY_STILL_INSTALLED = "legacy_still_installed"

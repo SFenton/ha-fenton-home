@@ -6,8 +6,8 @@ import sys
 from pathlib import Path
 
 import pytest
-from fenton_push import entities
-from fenton_push.jobs import (
+from fenton_home import entities
+from fenton_home.jobs import (
     Ctx,
     Memory,
     derive,
@@ -16,7 +16,7 @@ from fenton_push.jobs import (
     relevance_countdown,
     signals,
 )
-from fenton_push.snapshot import States, parse_time
+from fenton_home.snapshot import States, parse_time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import scenarios as sc  # noqa: E402
@@ -464,7 +464,7 @@ def test_parse_time() -> None:
 
 
 def test_a_detail_that_would_run_past_32_characters_drops_the_by_part() -> None:
-    from fenton_push import jobs as jobs_module  # noqa: PLC0415
+    from fenton_home import jobs as jobs_module  # noqa: PLC0415
 
     memory = Memory()
     memory.hot_flash_starter["right"] = "stephen"

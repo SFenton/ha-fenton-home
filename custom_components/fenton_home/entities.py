@@ -295,7 +295,7 @@ def style_for(job_id: str) -> Style:
 
 
 def resolve_device(device: str) -> str | None:
-    """A ``fenton_push.problem`` ``device`` to a job id: ``main_floor``, ``vacuum.main_floor`` or ``dishwasher``."""
+    """A ``fenton_home.problem`` ``device`` to a job id: ``main_floor``, ``vacuum.main_floor`` or ``dishwasher``."""
     name = (device or "").strip().lower().replace(" ", "_").replace("-", "_")
     if name.startswith(TAG_PREFIX):
         name = name[len(TAG_PREFIX):]
