@@ -17,15 +17,15 @@ from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
-from custom_components.fenton_push import entities, recovery
-from custom_components.fenton_push.const import (
+from custom_components.fenton_home import entities, recovery
+from custom_components.fenton_home.const import (
     CONF_LIVE_DEVICES,
     CONF_LIVE_JOBS,
     CONF_LIVE_JOBS_ENABLED,
     DOMAIN,
     SENSOR_JOBS,
 )
-from custom_components.fenton_push.live_jobs import LiveJobs
+from custom_components.fenton_home.live_jobs import LiveJobs
 
 from .test_integration import (
     DATA,
@@ -95,7 +95,7 @@ class Phones:
 @pytest.fixture(autouse=True)
 def no_startup_hold(monkeypatch):
     """The startup hold keeps cards while other integrations' entities load; most tests want it off."""
-    monkeypatch.setattr("custom_components.fenton_push.live_jobs.STARTUP_HOLD_SECONDS", 0)
+    monkeypatch.setattr("custom_components.fenton_home.live_jobs.STARTUP_HOLD_SECONDS", 0)
 
 
 @pytest.fixture
@@ -402,7 +402,7 @@ PROBLEM = {"device": "main_floor", "code": "navigation.stuck", "title": "Main Fl
 async def test_a_problem_is_a_card_for_people_with_s_plus_h_and_a_push_for_everyone_else(hass: HomeAssistant, world) -> None:
     world.donetick.add("Main Floor Vacuum · Robot Stuck", 4217)
     stuck(hass)
-    await hass.services.async_call("fenton_push", "problem", PROBLEM, blocking=True)
+    await hass.services.async_call("fenton_home", "problem", PROBLEM, blocking=True)
     await settle(hass)
     cards = sent(world, "hook-stephen-iphone")
     assert cards[0]["data"]["live_alert"] is True, "the card turned red once, with sound"
@@ -426,7 +426,7 @@ async def test_done_completes_the_task_ends_the_card_everywhere_and_clears_the_f
     monkeypatch.setitem(entities.DONETICK_USERS, STEPHEN, 1)
     world.donetick.add("Main Floor Vacuum · Robot Stuck", 4217)
     stuck(hass)
-    await hass.services.async_call("fenton_push", "problem", PROBLEM, blocking=True)
+    await hass.services.async_call("fenton_home", "problem", PROBLEM, blocking=True)
     await settle(hass)
     count = len(world.service.sent)
     await press(hass, "job.vacuum.main_floor", "done")
@@ -441,7 +441,7 @@ async def test_a_task_completed_elsewhere_ends_the_card_and_a_recovered_robot_ke
                                                                                                   world) -> None:
     world.donetick.add("Main Floor Vacuum · Robot Stuck", 4217)
     stuck(hass)
-    await hass.services.async_call("fenton_push", "problem", PROBLEM, blocking=True)
+    await hass.services.async_call("fenton_home", "problem", PROBLEM, blocking=True)
     await settle(hass)
     # The robot recovers and cleans on; the task is still open.
     hass.states.async_set("vacuum.valetudo_exaltedsneakydeer", "cleaning")
@@ -460,7 +460,7 @@ async def test_done_continues_when_donetick_errors_and_reports_when_it_never_com
     world.donetick.add("Main Floor Vacuum · Robot Stuck", 4217)
     world.donetick.fail = True
     stuck(hass)
-    await hass.services.async_call("fenton_push", "problem", PROBLEM, blocking=True)
+    await hass.services.async_call("fenton_home", "problem", PROBLEM, blocking=True)
     await settle(hass)
     count = len(world.service.sent)
     await press(hass, "job.vacuum.main_floor", "done")
@@ -478,7 +478,7 @@ async def test_a_problem_without_a_task_has_no_done_and_ends_when_the_condition_
     hass.states.async_set("sensor.main_floor_vacuum_coordinator_current_room", "none", {})
     hass.states.async_set("sensor.main_floor_vacuum_status", "low", {"current_issue": {
         "code": "power.low_battery", "raw": "Low battery", "reported_at": iso(time.time())}})
-    await hass.services.async_call("fenton_push", "problem", {
+    await hass.services.async_call("fenton_home", "problem", {
         "device": "main_floor", "code": "power.low_battery", "title": "Main Floor Vacuum · Low battery",
         "message": "Heading home.", "tag": "vacuum-kitchen-error"}, blocking=True)
     await settle(hass)
@@ -494,7 +494,7 @@ async def test_a_problem_without_a_task_has_no_done_and_ends_when_the_condition_
 
 async def test_the_task_is_found_after_the_automation_creates_it(hass: HomeAssistant, world) -> None:
     stuck(hass)
-    await hass.services.async_call("fenton_push", "problem", PROBLEM, blocking=True)
+    await hass.services.async_call("fenton_home", "problem", PROBLEM, blocking=True)
     await settle(hass)
     assert "task_id" not in sent(world, "hook-stephen-iphone")[-1]["data"]["fenton_activity"]["problem"]
     world.live.engine.records["vacuum.main_floor"].last_lookup = 0
@@ -506,7 +506,7 @@ async def test_the_task_is_found_after_the_automation_creates_it(hass: HomeAssis
 
 async def test_the_dishwasher_rinse_aid_task_goes_through_the_same_service(hass: HomeAssistant, world) -> None:
     world.donetick.add("Dishwasher · Refill rinse aid", 7)
-    await hass.services.async_call("fenton_push", "problem", {
+    await hass.services.async_call("fenton_home", "problem", {
         "device": "dishwasher", "code": "dishwasher.rinse_aid", "title": "Dishwasher · Rinse aid",
         "message": "Refill the rinse aid.", "task_title": "Dishwasher · Refill rinse aid", "tag": "dishwasher-rinse"},
         blocking=True)
@@ -517,11 +517,11 @@ async def test_the_dishwasher_rinse_aid_task_goes_through_the_same_service(hass:
 
 async def test_the_problem_service_validates_its_input(hass: HomeAssistant, world) -> None:
     with pytest.raises(ServiceValidationError):
-        await hass.services.async_call("fenton_push", "problem", {"device": "garage", "code": "x"}, blocking=True)
+        await hass.services.async_call("fenton_home", "problem", {"device": "garage", "code": "x"}, blocking=True)
     with pytest.raises(ServiceValidationError):
-        await hass.services.async_call("fenton_push", "problem", {"device": "main_floor"}, blocking=True)
+        await hass.services.async_call("fenton_home", "problem", {"device": "main_floor"}, blocking=True)
     # The robot's raw text is enough when there is no code.
-    await hass.services.async_call("fenton_push", "problem", {"device": "music_room", "raw": "Unknown error 12"},
+    await hass.services.async_call("fenton_home", "problem", {"device": "music_room", "raw": "Unknown error 12"},
                                    blocking=True)
     await settle(hass)
     assert world.live.engine.records["vacuum.music_room"].code == "vendor.unknown_error_12"
@@ -531,7 +531,7 @@ async def test_the_problem_service_validates_its_input(hass: HomeAssistant, worl
 async def test_with_cards_switched_off_everyone_gets_the_push(hass: HomeAssistant, world) -> None:
     hass.config_entries.async_update_entry(world.entry, options={CONF_LIVE_JOBS_ENABLED: False})
     await settle(hass)
-    await hass.services.async_call("fenton_push", "problem", PROBLEM, blocking=True)
+    await hass.services.async_call("fenton_home", "problem", PROBLEM, blocking=True)
     await settle(hass)
     assert len(world.phones.stephen) == 1 and len(world.phones.sent) == 1
     assert world.service.sent == []
@@ -539,7 +539,7 @@ async def test_with_cards_switched_off_everyone_gets_the_push(hass: HomeAssistan
 
 async def test_a_missing_person_notify_action_is_logged(hass: HomeAssistant, world, caplog) -> None:
     hass.services.async_remove("notify", "stephanie_s_phone")
-    await hass.services.async_call("fenton_push", "problem", PROBLEM, blocking=True)
+    await hass.services.async_call("fenton_home", "problem", PROBLEM, blocking=True)
     assert "No notify.stephanie_s_phone for Stephanie Hobart" in caplog.text
 
 
@@ -550,7 +550,7 @@ async def test_the_person_notify_action_name_is_an_option(hass: HomeAssistant, w
     hass.services.async_register("notify", "phone_of_stephanie", custom)
     hass.config_entries.async_update_entry(world.entry, options={"person_notify": "phone_of_*"})
     await settle(hass)
-    await hass.services.async_call("fenton_push", "problem", PROBLEM, blocking=True)
+    await hass.services.async_call("fenton_home", "problem", PROBLEM, blocking=True)
     assert world.phones.sent == [{"custom": True}]
 
 
@@ -560,11 +560,11 @@ async def test_the_person_notify_action_name_is_an_option(hass: HomeAssistant, w
 async def test_cards_and_problems_survive_a_restart(hass: HomeAssistant, world, hass_storage) -> None:
     world.donetick.add("Main Floor Vacuum · Robot Stuck", 4217)
     stuck(hass)
-    await hass.services.async_call("fenton_push", "problem", PROBLEM, blocking=True)
+    await hass.services.async_call("fenton_home", "problem", PROBLEM, blocking=True)
     start_fan(hass)
     await settle(hass)
     assert await hass.config_entries.async_unload(world.entry.entry_id)
-    saved = hass_storage["fenton_push.live_jobs"]["data"]
+    saved = hass_storage["fenton_home.live_jobs"]["data"]
     assert {(c["webhook_id"], c["tag"]) for c in saved["cards"]} >= {("hook-stephen-iphone", "job.fan.guest")}
     assert saved["records"][0]["task_id"] == 4217
     # While Home Assistant is down the fan stops. On the way back up the engine ends the orphaned card.
@@ -577,9 +577,9 @@ async def test_cards_and_problems_survive_a_restart(hass: HomeAssistant, world, 
 
 
 async def test_unload_removes_the_service_and_the_listeners(hass: HomeAssistant, world) -> None:
-    assert hass.services.has_service("fenton_push", "problem")
+    assert hass.services.has_service("fenton_home", "problem")
     assert await hass.config_entries.async_unload(world.entry.entry_id)
-    assert not hass.services.has_service("fenton_push", "problem")
+    assert not hass.services.has_service("fenton_home", "problem")
     count = len(world.service.sent)
     start_fan(hass)
     await settle(hass)
@@ -622,7 +622,7 @@ async def test_one_bad_cycle_is_logged_and_the_next_one_runs(hass: HomeAssistant
 
 async def test_garbage_in_the_store_is_skipped(hass: HomeAssistant, world, hass_storage) -> None:
     assert await hass.config_entries.async_unload(world.entry.entry_id)
-    hass_storage["fenton_push.live_jobs"] = {"version": 1, "key": "fenton_push.live_jobs", "data": {
+    hass_storage["fenton_home.live_jobs"] = {"version": 1, "key": "fenton_home.live_jobs", "data": {
         "cards": [{"webhook_id": "x"}, {"webhook_id": "h", "tag": "t", "started_at": "soon"}],
         "records": [{"job_id": "dishwasher", "bogus": 1}, {"nope": True}]}}
     assert await hass.config_entries.async_setup(world.entry.entry_id)
@@ -636,7 +636,7 @@ async def test_a_person_notify_that_raises_is_logged(hass: HomeAssistant, world,
         raise HomeAssistantError("phone off")
 
     hass.services.async_register("notify", "stephanie_s_phone", broken)
-    await hass.services.async_call("fenton_push", "problem", PROBLEM, blocking=True)
+    await hass.services.async_call("fenton_home", "problem", PROBLEM, blocking=True)
     assert "Couldn't notify Stephanie Hobart: phone off" in caplog.text
     assert world.live.engine.records["vacuum.main_floor"].pushed_to == []
 
@@ -647,7 +647,7 @@ async def test_after_a_restart_cards_are_kept_while_other_integrations_load(hass
     await settle(hass)
     assert await hass.config_entries.async_unload(world.entry.entry_id)
     hass.states.async_remove("input_boolean.guest_bathroom_fan_timer_pending")  # not loaded yet, as at startup
-    monkeypatch.setattr("custom_components.fenton_push.live_jobs.STARTUP_HOLD_SECONDS", 120)
+    monkeypatch.setattr("custom_components.fenton_home.live_jobs.STARTUP_HOLD_SECONDS", 120)
     count = len(world.service.sent)
     assert await hass.config_entries.async_setup(world.entry.entry_id)
     await settle(hass)
@@ -687,7 +687,7 @@ async def test_devices_sharing_a_name_each_get_their_card(hass: HomeAssistant, w
 
 async def test_cards_fall_back_to_the_name_action_without_the_service_object(hass: HomeAssistant, world,
                                                                             monkeypatch) -> None:
-    monkeypatch.setattr("custom_components.fenton_push.notify.NOTIFY_SERVICES", None)
+    monkeypatch.setattr("custom_components.fenton_home.notify.NOTIFY_SERVICES", None)
     start_fan(hass)
     await settle(hass)
     assert sorted(s["target"] for s in sent(world)) == ["hook-stephen-ipad", "hook-stephen-iphone"]

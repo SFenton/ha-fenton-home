@@ -32,8 +32,10 @@ from .const import (
     CONF_TEAM_ID,
     DEFAULT_BUNDLE_ID,
     DOMAIN,
+    LEGACY_DOMAIN,
 )
 from .entities import DEFAULT_PERSON_NOTIFY, JOB_IDS, STYLES
+from .legacy import async_migrate_store
 from .targets import live_devices
 
 KEY_SELECTOR = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD, multiline=False))
@@ -75,9 +77,26 @@ class FentonPushConfigFlow(ConfigFlow, domain=DOMAIN):
             return "cannot_connect"
         return None
 
+    async def async_step_import(self, import_data: dict[str, Any]) -> ConfigFlowResult:
+        """Copy a ``fenton_push`` entry verbatim (``legacy.py``): same data, options and unique id (the bundle id).
+
+        The values are not checked with Apple again, and never logged.
+        """
+        data = dict(import_data["data"])
+        await self.async_set_unique_id(import_data.get("unique_id") or data.get(CONF_BUNDLE_ID))
+        self._abort_if_unique_id_configured()
+        return self.async_create_entry(title=import_data.get("title") or f"{data.get(CONF_BUNDLE_ID)} (key {data.get(CONF_KEY_ID)})",
+                                       data=data, options=dict(import_data.get("options") or {}))
+
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Ask for the key and identifiers."""
         errors: dict[str, str] = {}
+        if (old := self.hass.config_entries.async_entries(LEGACY_DOMAIN)) and user_input is None:
+            # Adding the integration on a server that still has Fenton Home Push: take its key, ask for nothing.
+            await async_migrate_store(self.hass)
+            # The old entry is removed by ``async_setup_entry`` once this one exists.
+            return await self.async_step_import({"data": dict(old[0].data), "options": dict(old[0].options),
+                                                 "unique_id": old[0].unique_id, "title": old[0].title})
         if user_input is not None:
             data = _clean(user_input)
             await self.async_set_unique_id(data[CONF_BUNDLE_ID])

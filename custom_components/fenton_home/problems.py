@@ -222,7 +222,7 @@ def build_problem(
 class ProblemRecord:
     """An open problem on one device (one record per job id).
 
-    Raised by a sensor (``source == "sensor"``) or by the ``fenton_push.problem`` service (``"service"``). A service
+    Raised by a sensor (``source == "sensor"``) or by the ``fenton_home.problem`` service (``"service"``). A service
     record carries the automation's wording, the push tag of the fallback notification and the Donetick task.
     """
 

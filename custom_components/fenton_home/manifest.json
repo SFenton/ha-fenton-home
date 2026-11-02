@@ -1,14 +1,14 @@
 {
-  "domain": "fenton_push",
-  "name": "Fenton Home Push",
+  "domain": "fenton_home",
+  "name": "S+H Home Integration",
   "after_dependencies": ["mobile_app", "person"],
   "codeowners": ["@SFenton"],
   "config_flow": true,
   "dependencies": ["http", "notify"],
-  "documentation": "https://github.com/SFenton/ha-fenton-push",
+  "documentation": "https://github.com/SFenton/ha-fenton-home",
   "integration_type": "service",
   "iot_class": "cloud_push",
-  "issue_tracker": "https://github.com/SFenton/ha-fenton-push/issues",
+  "issue_tracker": "https://github.com/SFenton/ha-fenton-home/issues",
   "requirements": ["h2>=4.1.0"],
-  "version": "0.2.1"
+  "version": "1.0.0"
 }

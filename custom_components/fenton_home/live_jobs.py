@@ -483,10 +483,10 @@ class LiveJobs:
         if any([self.engine.dismiss(wh, tag, now) for wh in mine]):
             self._publish()
 
-    # -- fenton_push.problem -----------------------------------------------------------------------------------------
+    # -- fenton_home.problem -----------------------------------------------------------------------------------------
 
     async def async_problem(self, data: dict[str, Any]) -> None:
-        """``fenton_push.problem``: show the card to people with S+H, push everyone else (spec section 5)."""
+        """``fenton_home.problem``: show the card to people with S+H, push everyone else (spec section 5)."""
         job_id = resolve_device(str(data.get("device") or ""))
         if job_id is None:
             raise ServiceValidationError(f"Unknown device {data.get('device')!r}")

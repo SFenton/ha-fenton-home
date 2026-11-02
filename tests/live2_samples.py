@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 import scenarios as sc
-from fenton_push.engine import End, Engine, Push, service_data
+from fenton_home.engine import End, Engine, Push, service_data
 
 from samples import REGISTRATION_INFO
 

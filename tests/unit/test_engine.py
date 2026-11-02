@@ -6,8 +6,8 @@ import sys
 from pathlib import Path
 
 import pytest
-from fenton_push.engine import Engine, End, Push, Registration, render, stale_for
-from fenton_push.entities import HEARTBEAT_SECONDS, LINGER_SECONDS, MAX_AGE_SECONDS
+from fenton_home.engine import Engine, End, Push, Registration, render, stale_for
+from fenton_home.entities import HEARTBEAT_SECONDS, LINGER_SECONDS, MAX_AGE_SECONDS
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import scenarios as sc  # noqa: E402
@@ -435,7 +435,7 @@ def test_an_unmapped_error_is_quoted_logged_once_and_has_no_chips_or_done(caplog
     assert problem["message"] == 'The robot says "Wheel tangled in a cable". Check it, then tap Resume.'
     assert problem["chips"] == [] and "task_id" not in problem
     assert [c["id"] for c in push.content["controls"]] == ["resume", "dock"]
-    assert caplog.text.count("fenton_push.problem_unmapped") == 1
+    assert caplog.text.count("fenton_home.problem_unmapped") == 1
 
 
 def test_a_service_raised_problem_with_a_task_stays_until_the_task_is_completed() -> None:
@@ -592,7 +592,7 @@ def test_cards_with_no_job_are_kept_through_the_startup_hold_then_ended() -> Non
 
 
 def test_fan_stop_can_cancel_the_timer_first(monkeypatch) -> None:
-    from fenton_push import controls  # noqa: PLC0415
+    from fenton_home import controls  # noqa: PLC0415
 
     assert len(controls.fan_stop("guest").calls) == 1
     monkeypatch.setattr(controls, "FAN_STOP_CANCELS_TIMER_FIRST", True)

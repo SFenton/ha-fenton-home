@@ -5,10 +5,10 @@ from __future__ import annotations
 from datetime import UTC
 
 import pytest
-from fenton_push import controls
-from fenton_push.entities import ROBOTS, resolve_device
-from fenton_push.live import PROBLEM_ICONS
-from fenton_push.problems import (
+from fenton_home import controls
+from fenton_home.entities import ROBOTS, resolve_device
+from fenton_home.live import PROBLEM_ICONS
+from fenton_home.problems import (
     ICONS,
     ROWS,
     TABLE,

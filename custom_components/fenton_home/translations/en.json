@@ -31,7 +31,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "Fenton Home Push options",
+        "title": "S+H Home Integration options",
         "data": {
           "critical_alerts": "Send critical alerts",
           "push_base_url": "Push address base URL",
@@ -93,6 +93,16 @@
           "description": "More data for the ordinary notification."
         }
       }
+    }
+  },
+  "issues": {
+    "legacy_problem_service": {
+      "title": "An automation still calls {old}",
+      "description": "Something called the old service {old}. It still works, but switch that automation to {new}: the old name goes away in a later release."
+    },
+    "legacy_paths_unused": {
+      "title": "The old fenton_push paths can go",
+      "description": "Every S+H registration now uses /api/fenton_home/apns. The old /api/fenton_push/... paths and the fenton_push.problem service are only kept for compatibility, and a later release removes them."
     }
   }
 }
