@@ -517,6 +517,17 @@ class Engine:
 
     # -- feedback from the world -------------------------------------------------------------------------------------
 
+    def forget_webhook(self, webhook_id: str) -> int:
+        """Drop every card and timer kept for a removed registration. Returns how many cards went."""
+        gone = [key for key in self.cards if key[0] == webhook_id]
+        for key in gone:
+            del self.cards[key]
+        for table in (self.dismissed, self.ended_at):
+            for key in [k for k in table if k[0] == webhook_id]:
+                del table[key]
+        self.coalescer.forget_where(lambda k: isinstance(k, tuple) and k and k[0] == webhook_id)
+        return len(gone)
+
     def push_failed(self, webhook_id: str, tag: str, now: float) -> None:
         """A push could not be sent: forget what the device shows so the next pass sends it again."""
         card = self.cards.get((webhook_id, tag))

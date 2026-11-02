@@ -44,18 +44,32 @@ the `fenton_live_activity_*` events. The integration owns no entities.
 
 ## 1.1: device lifecycle
 
-- `POST /api/fenton_home/devices/unregister`, two routes:
-  - authenticated (HA access token): the entry's `user_id` must be the caller's; removes the `mobile_app` entry.
-  - deferred (no login): body carries the webhook id; removes only that registration. Same trust as `mobile_app` webhooks.
+- `POST /api/fenton_home/devices/unregister` with `{"webhook_id"}` (shipped 1.1.0, `docs/CONTRACT.md` 2a): one route, no
+  login required (the webhook id is the proof, as for `mobile_app` webhooks), removes only an S+H `mobile_app` entry; a
+  valid login, when sent, must be the registration's user. 410 for an unknown webhook, a per-address cap without login.
 - On any S+H `mobile_app` entry removal (app, admin, sweep), drop this integration's state for that webhook: live
   jobs, start tokens, rate counters.
 - App: sign-out unregisters before revoking the login and forgets the Keychain registration. A failed call stores
   `{server, webhook}` and retries the deferred route on next launch or network change. Re-login registers fresh
   (a 410 on a stale webhook already re-registers).
-- Check first: deleted registration `device_tracker.stephen_s_iphone_fenton_2` (webhook 4D77…, removed 2026-11-02) kept
-  sending fixes until the 16:28Z restart, although `devicectl` showed no `com.sfenton.home.uikit` app on the Duo.
-  Find which install held it before trusting "a deleted registration stays deleted".
-- Later, behind a dry-run option: sweep abandoned S+H registrations (no push details and 14 days without an update, or
+- Check first (done 2026-11-02, read-only on the server). Home Assistant 2026.10.4 core logs run back to Oct 30. They
+  hold **no mention of `4D77`**, of the removed entry id, or of any post to a removed webhook in the 08:28 to 10:28
+  window (times are server-local, UTC-8, so the restarts are 16:28Z, 18:28Z and 19:52Z). The only "Received message for
+  unregistered webhook" lines (45, Oct 30 to Nov 2 10:28:49, from the home address) are for one other webhook
+  `dcb1a2…`, which began the minute the first S+H registration was created, so it looks like a stale webhook of an
+  earlier install. `4D77…` is not 64 lowercase hex like a webhook id; it looks like the Duo's device id, which the
+  logs and registries I may read don't show. What the core source does show: `webhook` answers a post to an
+  unregistered id with 200 and an empty body (logged at info), so the app is never told it was removed; `mobile_app`
+  only registers the 410 "Deleted Webhook" handler for removed ids at *setup* (`async_setup`, from its stored
+  `deleted_ids`), so the 410 appears only after the next restart. That explains "kept sending until the restart"
+  (the app sees success, then 410 and re-registers) but not stored fixes: a post to a removed webhook is dropped and
+  can't move a tracker. Conclusion: "a deleted registration stays deleted" **holds on the server** (entry, entities and
+  webhook handler are gone and posts are discarded), and I found no evidence of fixes being accepted after deletion.
+  What doesn't hold is the app finding out. Unverified: which install on the Duo held `4D77…`, and what moved
+  `device_tracker.stephen_s_iphone_fenton_2` (the recorder database and `.storage` are off limits); a composite
+  tracker or the other registration may have kept the person's location current. Hence 1.1: the app unregisters on
+  sign-out and treats an unknown webhook as gone, and removal purges our state.
+- Shipped in 1.1.0 (`sweep_mode`, default `dry_run`): sweep abandoned S+H registrations (no push details and 14 days without an update, or
   superseded by the same user's newer registration of the same model and 7 days without an update). Never touches
   other apps' registrations; every removal is logged.
 

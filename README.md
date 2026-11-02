@@ -108,7 +108,30 @@ button, and the notification is cleared when it ends. A problem with no task end
 - **Send critical alerts.** Leave off until Apple grants the app the Critical Alerts entitlement. While it is off, `critical` notifications arrive as time-sensitive with the default sound.
 - **Push address base URL.** Where Home Assistant can reach itself (for example `http://127.0.0.1:8123`). Empty uses the internal URL.
 - **Show job cards**, **Jobs that get a card**, **Devices that get cards.** The master switch for Live Activity cards, which jobs run, and which devices (empty: every device with Live Activities allowed) get them. With the switch off, problems go to everyone as ordinary notifications.
+- **Sweep abandoned registrations.** `off`, `dry_run` (default: list candidates, remove nothing) or `on`; see Device lifecycle.
 - **Notify action for people without the app.** The action that reaches a person's whole phone, with `*` for their first name; the default `*_s_phone` is `notify.stephen_s_phone`.
+
+## Device lifecycle (1.1)
+
+Each phone, iPad or watch signed in to the app is a `mobile_app` registration. The app removes its own when the person
+signs out (`POST /api/fenton_home/devices/unregister`, contract section 2a), and a failed call is retried later with the
+registration's webhook id alone. A removal by the app, by an admin in Settings, or by the sweep below also drops what
+this integration kept for that registration: job cards and their timers, the daily push counter and timestamp counters.
+Home Assistant itself removes the entities, the notify target and its Live Activity tokens.
+
+### Sweep of abandoned registrations
+
+A reinstall or a new login that registers afresh leaves the old registration behind. The **Sweep abandoned
+registrations** option (`off`, `dry_run`, `on`; default `dry_run`) finds those, at startup and then daily. A
+registration of this app is a candidate when it has stopped updating (newest state among its entities, else the
+entry's last change) and either:
+
+- it has no push details (the app signed out) and 14 days have passed, or
+- the same person has a newer S+H registration of the same model and 7 days have passed.
+
+Other apps' registrations (the official Companion app included) are never touched. In `dry_run` each candidate is
+logged at info and listed in a Repairs issue, and nothing is removed; in `on` each is removed and logged. Read the
+dry-run list for a while before turning it on.
 
 ## How it works
 
@@ -116,6 +139,7 @@ button, and the notification is cleared when it ends. A problem with no task end
 
 - `GET /api/fenton_home/config` (access token) tells the app which `push_url` to register.
 - `POST /api/fenton_home/apns` is that `push_url`. Home Assistant's `mobile_app` posts each notification there without credentials, so a request is honoured only when its webhook id and push token match a real Fenton Home registration. It maps the notification to an APNs payload (`payload.py`) and sends it over HTTP/2 with a token signed by your key (`apns.py`).
+- `POST /api/fenton_home/devices/unregister` removes the caller's own S+H registration; the webhook id is the proof, and a calls-per-minute cap guards the no-login form.
 - A device gets at most 1,000 pushes per UTC day, as a guard against runaway automations.
 - Apple tokens from Xcode builds use the sandbox service and TestFlight builds use production; the app says which, and a token from the other environment is retried there once.
 

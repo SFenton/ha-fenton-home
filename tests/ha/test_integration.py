@@ -337,7 +337,7 @@ async def test_options_flow(hass: HomeAssistant, configured) -> None:
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert configured.options == {
         CONF_CRITICAL_ALERTS: True, CONF_PUSH_BASE_URL: "http://127.0.0.1:8123", "live_jobs_enabled": True,
-        "live_jobs": list(JOB_IDS), "live_devices": [], "person_notify": "*_s_phone"}
+        "live_jobs": list(JOB_IDS), "live_devices": [], "person_notify": "*_s_phone", "sweep_mode": "dry_run"}
     assert hass.data[DOMAIN][configured.entry_id].critical_alerts is True
 
 

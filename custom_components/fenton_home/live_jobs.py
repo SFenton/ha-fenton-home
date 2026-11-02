@@ -198,6 +198,14 @@ class LiveJobs:
         self.request()
 
     @callback
+    def forget_webhook(self, webhook_id: str) -> None:
+        """A registration was removed: drop its cards and warning memory, then run a cycle without it."""
+        self._no_action.discard(webhook_id)
+        if self.engine.forget_webhook(webhook_id):
+            self._save()
+        self.request()
+
+    @callback
     def _on_entry_changed(self, change: Any, entry: Any) -> None:
         if getattr(entry, "domain", None) == "mobile_app":
             self.request()

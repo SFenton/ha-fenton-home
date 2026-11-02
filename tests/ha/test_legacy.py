@@ -270,7 +270,7 @@ async def test_alias_service_has_a_description(hass: HomeAssistant) -> None:
     from custom_components.fenton_home.legacy import async_register_alias_service  # noqa: PLC0415
 
     with patch("custom_components.fenton_home.legacy.service_helper.async_set_service_schema") as describe:
-        async_register_alias_service(hass, AsyncMock(), None)
+        await async_register_alias_service(hass, AsyncMock(), None)
     domain, service, schema = describe.call_args.args[1:]
     assert (domain, service) == ("fenton_push", "problem") and "device" in schema["fields"]
 
