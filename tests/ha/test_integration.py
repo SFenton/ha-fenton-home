@@ -299,7 +299,8 @@ async def test_a_device_mobile_app_doesnt_know_is_skipped(hass: HomeAssistant, c
     mobile_app(hass).unregistered.add("hook-stephen-iphone")
     await hass.services.async_call("notify", "fenton_stephen", {"message": "Hi"}, blocking=True)
     assert reached(mobile_app(hass)) == ["hook-stephen-ipad"]
-    assert "mobile_app has no registration for webhook hook-stephen-iphone" in caplog.text
+    assert "mobile_app has no registration for webhook" not in [r.message for r in caplog.records
+                                                                if r.levelname == "WARNING"]
     assert "Couldn't notify hook-stephen-iphone · Fenton" in caplog.text
 
 

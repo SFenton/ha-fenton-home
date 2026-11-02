@@ -68,8 +68,9 @@ async def send_to_device(hass: HomeAssistant, device: Device | None, webhook_id:
         kwargs = {k: v for k, v in service_data.items() if k != "message"}
         try:
             await service.async_send_message(service_data.get("message", ""), target=[webhook_id], **kwargs)
-        except KeyError:  # mobile_app has no registration under this webhook id (removed, or not loaded yet)
-            _LOGGER.warning("mobile_app has no registration for webhook %s", webhook_id)
+        except KeyError:  # mobile_app has no registration under this webhook id (removed, disabled, or not loaded yet)
+            # Debug only: the callers warn, and the live-card retry would otherwise repeat this every 30 s.
+            _LOGGER.debug("mobile_app has no registration for webhook %s", webhook_id)
             return False
         return True
     if device is None:
