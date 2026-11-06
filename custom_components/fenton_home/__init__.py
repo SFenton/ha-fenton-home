@@ -36,6 +36,7 @@ from .const import (
     SERVICE_PROBLEM,
 )
 from .devices import async_watch_removals
+from .house_config import async_setup_house_config
 from .legacy import (
     async_import_legacy,
     async_register_alias_service,
@@ -102,6 +103,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Import a leftover ``fenton_push`` entry. A background task: the import flow sets the new entry up, which waits
     for this setup to finish."""
     hass.async_create_task(async_import_legacy(hass))
+    await async_setup_house_config(hass)
     return True
 
 

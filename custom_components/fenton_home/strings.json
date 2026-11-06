@@ -61,6 +61,10 @@
     }
   },
   "services": {
+    "reload_house_config": {
+      "name": "Reload the house configuration",
+      "description": "Reads the house configuration file again and sends the new document to every app that is following it. A bad file raises a repair and the last good copy stays."
+    },
     "problem": {
       "name": "Raise a device problem",
       "description": "Shows a problem card on the Live Activities of people who have the app and sends the ordinary notification to everyone else.",
@@ -105,6 +109,10 @@
     }
   },
   "issues": {
+    "house_config_invalid": {
+      "title": "The house configuration file was rejected",
+      "description": "The file in {directory} could not be used ({reason}). The app keeps the last good copy. Fix the file (a mapping with a whole-number schema of 1 or more, each section a mapping or a list, under 256 KB), then run fenton_home.reload_house_config."
+    },
     "legacy_problem_service": {
       "title": "An automation still calls {old}",
       "description": "Something called the old service {old}. It still works, but switch that automation to {new}: the old name goes away in a later release."
