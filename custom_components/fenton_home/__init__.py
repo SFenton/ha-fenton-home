@@ -36,6 +36,8 @@ from .const import (
     SERVICE_PROBLEM,
 )
 from .devices import async_watch_removals
+from .house_config import async_setup_house_config
+from .house_config import get as house_config
 from .legacy import (
     async_import_legacy,
     async_register_alias_service,
@@ -102,6 +104,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Import a leftover ``fenton_push`` entry. A background task: the import flow sets the new entry up, which waits
     for this setup to finish."""
     hass.async_create_task(async_import_legacy(hass))
+    await async_setup_house_config(hass)
     return True
 
 
@@ -111,6 +114,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         client = APNsClient(credentials(dict(entry.data)), http_client(hass))
     except ValueError as err:
         raise ConfigEntryError("The saved APNs key can't be read; re-add the integration") from err
+    if not house_config(hass).active:  # the entry is loading again after an unload
+        await house_config(hass).async_activate()
     runtime = PushRuntime(client=client, bundle_id=client.credentials.bundle_id, options=dict(entry.options))
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = runtime
     register_views(hass)
@@ -159,6 +164,7 @@ async def _options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Stop forwarding (the push endpoint answers 503 once no entry is loaded) and drop the person targets."""
+    house_config(hass).async_deactivate()
     runtime = hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
     if runtime is not None and runtime.live is not None:
         await runtime.live.async_stop()

@@ -77,3 +77,13 @@ DEFAULT_PRESENCE_EXCLUDE = ["device_tracker.iphone_18_pro", "device_tracker.ipho
 ISSUE_PRESENCE_COMPOSITE_MISSING = "presence_composite_missing"
 ISSUE_PRESENCE_NO_COMPOSITE = "presence_no_composite"
 ISSUE_PRESENCE_COMPOSITE_YAML = "presence_composite_yaml"
+
+#: The house configuration document (``house_config.py``): a folder under the Home Assistant config directory,
+#: the files tried in order (YAML wins), the size limit, the websocket commands, the admin service and its Repair.
+HOUSE_CONFIG_DIR = "fenton_home"
+HOUSE_CONFIG_FILES = ("house.yaml", "house.json")
+HOUSE_CONFIG_MAX_BYTES = 256 * 1024
+WS_HOUSE_CONFIG = "fenton_home/house_config"
+WS_HOUSE_CONFIG_SUBSCRIBE = "fenton_home/house_config/subscribe"
+SERVICE_RELOAD_HOUSE_CONFIG = "reload_house_config"
+ISSUE_HOUSE_CONFIG_INVALID = "house_config_invalid"

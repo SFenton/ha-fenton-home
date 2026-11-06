@@ -199,6 +199,20 @@ New names avoid that:
 Side effect: the composites' battery and speed sensors are new entities too (`sensor.stephen_presence_battery_level`
 and so on); anything that recorded the old `sensor.*_location_*` ids has to be pointed at the new ones.
 
+## House configuration (1.3)
+
+The integration can serve one configuration document to the S+H app, so house-specific data (rooms, helper roles and the like) lives on your server and not in the app.
+
+- **File:** `/config/fenton_home/house.yaml` or `/config/fenton_home/house.json`. YAML wins when both exist; with neither, the integration answers "not configured".
+- **Checks (shallow on purpose):** the file is a mapping with a whole-number `schema` of 1 or more, every other top-level value is a mapping or a list, and the file is under 256 KB. The integration knows no section names; the app validates the fields against its own versioned schema.
+- **Bad file:** a Repairs issue ("The house configuration file was rejected") names the reason, and the last good document stays in service. Fixing the file and reloading clears it.
+- **Websocket commands** (any signed-in user, not admin-only):
+  - `fenton_home/house_config` returns `{"schema": n, "hash": "<sha256>", "config": {...}}`, or `{"configured": false}`.
+  - `fenton_home/house_config/subscribe` sends the current document, then a new message after each successful reload. Unsubscribe with `unsubscribe_events`.
+- **Service:** `fenton_home.reload_house_config` (administrators) reads the file again and notifies subscribers. The file is also read when the integration starts.
+- YAML anchors and aliases are not limited (only an administrator can write the file); a file that expands to something huge is the author's doing.
+- Keep the file out of this repository: it describes your own house.
+
 ## How it works
 
 `docs/CONTRACT.md` is the wire contract with the app. In short:

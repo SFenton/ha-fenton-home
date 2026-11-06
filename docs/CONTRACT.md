@@ -328,3 +328,15 @@ push the relay:
 | `fenton_live_activity_action` | phone to engine (registration webhook `fire_event`) | `{tag, job, control}`; the event's user comes from the registration |
 | `fenton_live_activity_dismissed` | phone to engine | `{tag}`; a webhook id is a credential and events are recorded, so none is sent. With several devices showing the tag the engine narrows to the one whose token core just dropped |
 | `fenton_home.problem` | automation to engine | `{device, code?, raw?, title?, message?, task_title?, url?, tag?, data?}` |
+
+## House configuration
+
+One document, `/config/fenton_home/house.yaml` (or `house.json`; YAML wins), served over the websocket to any signed-in user. The integration checks only its shape; the app validates the fields.
+
+| Name | Direction | Data |
+|---|---|---|
+| `fenton_home/house_config` | app to server (websocket command) | result: `{schema, hash, config}` (`hash` is the sha256 of the schema number and the canonical JSON of `config`), or `{configured: false}` |
+| `fenton_home/house_config/subscribe` | app to server | result `null`, then an event with the same payload now and after each successful reload (and `{configured: false}` if the integration is unloaded). Unsubscribe with `unsubscribe_events` |
+| `fenton_home.reload_house_config` | administrator to server (service) | none; reads the file again and notifies subscribers |
+
+A file that fails the checks (not a mapping, no integer `schema` of 1 or more, a section that is neither mapping nor list, NaN or Infinity, nested too deeply, unreadable, over 256 KB) raises the `house_config_invalid` Repair and the last good document stays in service.

@@ -59,3 +59,9 @@ problem:
       description: More data for the ordinary notification (push options, actions).
       selector:
         object:
+
+reload_house_config:
+  name: Reload the house configuration
+  description: >-
+    Reads fenton_home/house.yaml (or house.json) from the Home Assistant configuration folder again and sends the
+    new document to every app that is following it. A bad file raises a repair and the last good copy stays.
