@@ -87,15 +87,12 @@ def test_a_file_that_is_not_utf8_is_refused(tmp_path) -> None:
 
 
 def test_deep_nesting_is_refused_not_raised(tmp_path) -> None:
-    assert reason("[" * 100_000, is_json=True) in {"too_deep", "unparseable"}
+    assert reason("[" * 100_000, is_json=True) == "too_deep"
+    assert reason("schema: 1\nrooms: " + "[" * 900 + "]" * 900, is_json=False) == "too_deep"
     (tmp_path / "house.yaml").write_text("schema: 1\nrooms: " + "[" * 1200)
-    with pytest.raises(HouseConfigError):
+    with pytest.raises(HouseConfigError) as err:
         load_file(tmp_path)
-    nested = "schema: 1\nrooms: " + "[" * 900 + "]" * 900
-    try:
-        parse_document(nested, is_json=False)
-    except HouseConfigError as err:
-        assert err.reason in {"too_deep", "unparseable", "not_json"}
+    assert err.value.reason == "too_deep"
 
 
 def test_nan_and_infinity_are_refused() -> None:

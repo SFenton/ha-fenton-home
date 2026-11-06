@@ -210,7 +210,7 @@ async def test_a_disconnect_without_unsubscribing_leaks_no_listener(hass: HomeAs
     assert len(house(hass)._listeners) == 0
 
 
-async def test_unloading_the_entry_cleans_subscribers_and_the_commands_go_quiet(hass: HomeAssistant, hass_ws_client) -> None:
+async def test_unloading_keeps_subscribers_and_setup_pushes_to_them(hass: HomeAssistant, hass_ws_client) -> None:
     await write(hass, "house.json", json.dumps(DEMO))
     entry = MockConfigEntry(domain=DOMAIN, data=DATA, unique_id="com.sfenton.home")
     entry.add_to_hass(hass)
@@ -220,13 +220,45 @@ async def test_unloading_the_entry_cleans_subscribers_and_the_commands_go_quiet(
     ws = await hass_ws_client()
     await ws.send_json({"id": 1, "type": WS_HOUSE_CONFIG_SUBSCRIBE})
     await ws.receive_json()
-    assert (await ws.receive_json())["event"]["schema"] == 1
+    assert (await ws.receive_json())["event"]["config"] == {"rooms": DEMO["rooms"]}
+
     assert await hass.config_entries.async_unload(entry.entry_id)
     assert (await ws.receive_json())["event"] == {"configured": False}
-    assert len(house(hass)._listeners) == 0
+    assert len(house(hass)._listeners) == 1
     await ws.send_json({"id": 2, "type": WS_HOUSE_CONFIG})
     assert (await ws.receive_json())["result"] == {"configured": False}
+
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
-    await ws.send_json({"id": 3, "type": WS_HOUSE_CONFIG})
-    assert (await ws.receive_json())["result"]["schema"] == 1
+    event = await ws.receive_json()
+    assert event["id"] == 1 and event["event"]["config"] == {"rooms": DEMO["rooms"]}
+
+    await write(hass, "house.json", json.dumps(DEMO_2))
+    await reload(hass)
+    assert (await ws.receive_json())["event"]["config"] == {"rooms": DEMO_2["rooms"]}
+
+    await ws.close()
+    await hass.async_block_till_done()
+    assert len(house(hass)._listeners) == 0
+
+
+async def test_an_unload_during_a_reload_leaves_no_stale_repair_or_document(hass: HomeAssistant) -> None:
+    await write(hass, "house.json", json.dumps(DEMO))
+    await start(hass)
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def slow_executor(func, *args):
+        started.set()
+        await release.wait()
+        return func(*args)
+
+    await write(hass, "house.json", "{broken")
+    with patch.object(hass, "async_add_executor_job", slow_executor):
+        task = hass.async_create_task(house(hass).async_reload())
+        await started.wait()
+        house(hass).async_deactivate()
+        release.set()
+        assert await task is False
+    assert invalid_issue(hass) is None
+    assert house(hass).document is None
+    assert house(hass).payload == {"configured": False}

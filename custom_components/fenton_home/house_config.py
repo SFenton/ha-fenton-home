@@ -136,6 +136,8 @@ class HouseConfig:
             if not self.active:
                 return False
             directory = Path(self.hass.config.path(HOUSE_CONFIG_DIR))
+            reason: str | None = None
+            document = None
             try:
                 document = await self.hass.async_add_executor_job(load_file, directory)
             except HouseConfigError as err:
@@ -143,7 +145,9 @@ class HouseConfig:
             except Exception:  # noqa: BLE001 - a house file must never take the integration down
                 _LOGGER.exception("house configuration could not be loaded")
                 reason = "unexpected"
-            else:
+            if not self.active:  # unloaded while the file was being read: drop the result
+                return False
+            if reason is None:
                 ir.async_delete_issue(self.hass, DOMAIN, ISSUE_HOUSE_CONFIG_INVALID)
                 self.document = document
                 self._notify()
@@ -169,12 +173,12 @@ class HouseConfig:
 
     @callback
     def async_deactivate(self) -> None:
-        """The config entry unloaded: subscribers hear "not configured" and are dropped; the commands answer the
-        same until the entry loads again."""
+        """The config entry unloaded: subscribers hear "not configured" once and stay subscribed (a client leaves
+        by unsubscribing or disconnecting); the commands answer the same until the entry loads again, when the
+        reload pushes the document to them."""
         self.active = False
         self.document = None
         self._notify()
-        self._listeners.clear()
         ir.async_delete_issue(self.hass, DOMAIN, ISSUE_HOUSE_CONFIG_INVALID)
 
     @callback
