@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from homeassistant.core import Context, HomeAssistant
 from homeassistant.exceptions import Unauthorized
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.setup import async_setup_component
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from .test_integration import DATA
 from custom_components.fenton_home.const import (
     DOMAIN,
     HOUSE_CONFIG_MAX_BYTES,
@@ -19,6 +23,7 @@ from custom_components.fenton_home.const import (
     WS_HOUSE_CONFIG,
     WS_HOUSE_CONFIG_SUBSCRIBE,
 )
+from custom_components.fenton_home.house_config import get as house
 
 DEMO = {"schema": 1, "rooms": [{"id": "demo_room", "name": "Demo Room"}]}
 DEMO_2 = {"schema": 1, "rooms": [{"id": "demo_room", "name": "Demo Room"}, {"id": "demo_hall", "name": "Demo Hall"}]}
@@ -165,3 +170,63 @@ async def test_the_reload_service_is_admin_only(hass: HomeAssistant, hass_read_o
     with pytest.raises(Unauthorized):
         await reload(hass, hass_read_only_user.id)
     await reload(hass, hass_admin_user.id)
+
+
+async def test_a_deeply_nested_file_never_fails_setup(hass: HomeAssistant) -> None:
+    await write(hass, "house.yaml", "schema: 1\nrooms: " + "[" * 1200)
+    await start(hass)
+    assert DOMAIN in hass.config.components
+    assert invalid_issue(hass) is not None
+
+
+async def test_an_unexpected_error_raises_a_repair_and_keeps_the_last_good(hass: HomeAssistant) -> None:
+    await write(hass, "house.json", json.dumps(DEMO))
+    await start(hass)
+    good = house(hass).payload
+    with patch("custom_components.fenton_home.house_config.load_file", side_effect=PermissionError("denied")):
+        await reload(hass)
+    assert invalid_issue(hass).translation_placeholders["reason"] == "unexpected"
+    assert house(hass).payload == good
+
+
+async def test_concurrent_reloads_finish_in_order(hass: HomeAssistant) -> None:
+    await write(hass, "house.json", json.dumps(DEMO))
+    await start(hass)
+    await write(hass, "house.json", json.dumps(DEMO_2))
+    await asyncio.gather(house(hass).async_reload(), house(hass).async_reload())
+    assert house(hass).payload["config"] == {"rooms": DEMO_2["rooms"]}
+
+
+async def test_a_disconnect_without_unsubscribing_leaks_no_listener(hass: HomeAssistant, hass_ws_client) -> None:
+    await write(hass, "house.json", json.dumps(DEMO))
+    await start(hass)
+    ws = await hass_ws_client()
+    await ws.send_json({"id": 1, "type": WS_HOUSE_CONFIG_SUBSCRIBE})
+    await ws.receive_json()
+    await ws.receive_json()
+    assert len(house(hass)._listeners) == 1
+    await ws.close()
+    await hass.async_block_till_done()
+    assert len(house(hass)._listeners) == 0
+
+
+async def test_unloading_the_entry_cleans_subscribers_and_the_commands_go_quiet(hass: HomeAssistant, hass_ws_client) -> None:
+    await write(hass, "house.json", json.dumps(DEMO))
+    entry = MockConfigEntry(domain=DOMAIN, data=DATA, unique_id="com.sfenton.home")
+    entry.add_to_hass(hass)
+    assert await async_setup_component(hass, "websocket_api", {})
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    ws = await hass_ws_client()
+    await ws.send_json({"id": 1, "type": WS_HOUSE_CONFIG_SUBSCRIBE})
+    await ws.receive_json()
+    assert (await ws.receive_json())["event"]["schema"] == 1
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    assert (await ws.receive_json())["event"] == {"configured": False}
+    assert len(house(hass)._listeners) == 0
+    await ws.send_json({"id": 2, "type": WS_HOUSE_CONFIG})
+    assert (await ws.receive_json())["result"] == {"configured": False}
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    await ws.send_json({"id": 3, "type": WS_HOUSE_CONFIG})
+    assert (await ws.receive_json())["result"]["schema"] == 1

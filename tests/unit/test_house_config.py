@@ -84,3 +84,38 @@ def test_a_file_that_is_not_utf8_is_refused(tmp_path) -> None:
     with pytest.raises(HouseConfigError) as err:
         load_file(tmp_path)
     assert err.value.reason == "unreadable"
+
+
+def test_deep_nesting_is_refused_not_raised(tmp_path) -> None:
+    assert reason("[" * 100_000, is_json=True) in {"too_deep", "unparseable"}
+    (tmp_path / "house.yaml").write_text("schema: 1\nrooms: " + "[" * 1200)
+    with pytest.raises(HouseConfigError):
+        load_file(tmp_path)
+    nested = "schema: 1\nrooms: " + "[" * 900 + "]" * 900
+    try:
+        parse_document(nested, is_json=False)
+    except HouseConfigError as err:
+        assert err.reason in {"too_deep", "unparseable", "not_json"}
+
+
+def test_nan_and_infinity_are_refused() -> None:
+    assert reason('{"schema": 1, "rooms": [NaN]}') == "not_json"
+    assert reason("schema: 1\nrooms: [.inf]\n", is_json=False) == "not_json"
+
+
+def test_the_same_content_hashes_equally_in_yaml_and_json() -> None:
+    from_json = parse_document(json.dumps(DEMO), is_json=True)
+    from_yaml = parse_document("schema: 1\nrooms:\n  - id: demo_room\n    name: Demo Room\nweather:\n  entity: weather.demo\n", is_json=False)
+    assert from_json["hash"] == from_yaml["hash"]
+
+
+def test_an_unreadable_file_is_refused(tmp_path) -> None:
+    path = tmp_path / "house.json"
+    path.write_text(json.dumps(DEMO))
+    path.chmod(0)
+    try:
+        with pytest.raises(HouseConfigError) as err:
+            load_file(tmp_path)
+        assert err.value.reason == "unreadable"
+    finally:
+        path.chmod(0o600)

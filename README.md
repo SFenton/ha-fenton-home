@@ -210,6 +210,7 @@ The integration can serve one configuration document to the S+H app, so house-sp
   - `fenton_home/house_config` returns `{"schema": n, "hash": "<sha256>", "config": {...}}`, or `{"configured": false}`.
   - `fenton_home/house_config/subscribe` sends the current document, then a new message after each successful reload. Unsubscribe with `unsubscribe_events`.
 - **Service:** `fenton_home.reload_house_config` (administrators) reads the file again and notifies subscribers. The file is also read when the integration starts.
+- YAML anchors and aliases are not limited (only an administrator can write the file); a file that expands to something huge is the author's doing.
 - Keep the file out of this repository: it describes your own house.
 
 ## How it works
