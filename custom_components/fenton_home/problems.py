@@ -235,6 +235,9 @@ class ProblemRecord:
     since: float | None = None
     #: The sensor path has reported this problem at least once.
     sensor_seen: bool = False
+    #: The device was seen not running after the sensors reported this problem. Stored with the record; a record
+    #: stored before this field existed reads False, so its card waits for its task.
+    seen_idle: bool = False
     task_title: str | None = None
     task_id: int | None = None
     lookups: int = 0

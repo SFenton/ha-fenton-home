@@ -10,5 +10,5 @@
   "iot_class": "cloud_push",
   "issue_tracker": "https://github.com/SFenton/ha-fenton-home/issues",
   "requirements": ["h2>=4.1.0"],
-  "version": "1.3.0"
+  "version": "1.3.1"
 }

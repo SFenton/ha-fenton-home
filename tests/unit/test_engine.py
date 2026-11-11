@@ -460,34 +460,114 @@ def test_a_service_raised_problem_with_a_task_stays_while_the_device_runs_no_job
     assert [r.push_tag for r in engine.take_ended_records()] == ["vacuum-kitchen-error"]
 
 
-def test_a_problem_with_a_task_ends_when_the_issue_is_clear_and_the_device_runs_its_job_again() -> None:
+DOCKED = sc.main_floor("docked", room_id="", phase="idle", auto=False)
+
+
+def tasked(engine: Engine, job_id: str, code: str, tag: str = "problem-tag") -> None:
+    engine.raise_problem(job_id, code, None, NOW, task_title="A task", push_tag=tag)
+    engine.records[job_id].task_id = 4217
+
+
+def test_a_vacuum_that_stopped_with_a_problem_and_resumed_ends_its_card_when_it_runs_again() -> None:
+    """The reported case. Fails on main (the card stayed a problem card) and on the first version (one reading ended it)."""
     engine = Engine()
-    engine.raise_problem("vacuum.main_floor", "mop.clean_water_empty", None, NOW, task_title="Main Floor Vacuum · Clean Water",
-                         push_tag="vacuum-clean-water")
-    engine.records["vacuum.main_floor"].task_id = 4217
-    docked = sc.main_floor("docked", room_id="", phase="idle", auto=False)
-    # Docked with the error already cleared (it clears seconds after the dock): not enough to end the card.
-    (push,) = sc.pushes(run(engine, docked))
+    tasked(engine, "vacuum.main_floor", "mop.clean_water_empty", "vacuum-clean-water")
+    (push,) = sc.pushes(run(engine, sc.main_floor_issue("mop.clean_water_empty")))
     assert push.content["phase"] == "problem"
-    # The robot cleans again with no issue: the job card returns and the problem ends; the task stays open.
-    (running,) = sc.pushes(run(engine, sc.main_floor(), 60))
+    # Docked, the error already cleared (it clears seconds after the dock): the card stays.
+    assert all(p.content["phase"] == "problem" for p in sc.pushes(run(engine, DOCKED, 20)))
+    # Cleaning again with no issue: one reading is not enough.
+    assert all(p.content["phase"] == "problem" for p in sc.pushes(run(engine, sc.main_floor(), 60)))
+    assert "vacuum.main_floor" in engine.records
+    # Still cleaning half a minute later: the job card returns and the task stays open.
+    (running,) = sc.pushes(run(engine, sc.main_floor(), 100))
     assert running.content["phase"] == "running" and not running.alert
-    assert engine.records == {}
-    assert [r.push_tag for r in engine.take_ended_records()] == ["vacuum-clean-water"]
-    assert running.content["controls"] and "done" not in [c["id"] for c in running.content["controls"]]
+    assert engine.records == {} and engine.take_ended_records()[0].task_completed is False
     # The job finishes like any other job.
-    finished = run(engine, docked, 600)
-    assert sc.ends(finished) or all(p.content["phase"] != "problem" for p in sc.pushes(finished))
+    assert [e.reason for e in sc.ends(run(engine, DOCKED, 900))] == ["gone"]
+
+
+def test_a_vacuum_problem_raised_while_it_cleans_with_no_issue_reported_stays_for_its_task() -> None:
+    """Fails without the narrowing: the card ended within a minute although the sensors never reported the problem."""
+    engine = Engine()
+    tasked(engine, "vacuum.main_floor", "navigation.stuck")
+    for at in (0, 60, 200, 600):
+        plan = run(engine, sc.main_floor(), at)
+        assert all(p.content["phase"] == "problem" for p in sc.pushes(plan)) and sc.ends(plan) == []
+    assert "vacuum.main_floor" in engine.records
+
+
+def test_a_dishwasher_problem_with_no_sensor_raised_during_a_run_stays_for_its_task() -> None:
+    """Fails without the narrowing: a rinse aid problem raised during a run ended once its task was linked."""
+    engine = Engine()
+    tasked(engine, "dishwasher", "dishwasher.rinse_aid")
+    for at in (0, 60, 200):
+        plan = run(engine, sc.dishwasher("run"), at)
+        assert all(p.content["phase"] == "problem" for p in sc.pushes(plan)) and sc.ends(plan) == []
+    assert "dishwasher" in engine.records
+
+
+def test_a_paused_vacuum_whose_issue_clears_keeps_its_card_until_it_runs() -> None:
+    """Fails without the narrowing: paused counted as running and the card ended before Resume."""
+    engine = Engine()
+    tasked(engine, "vacuum.main_floor", "mop.clean_water_empty")
+    run(engine, sc.main_floor_issue("mop.clean_water_empty", vac="paused"))
+    for at in (20, 80, 200):
+        assert all(p.content["phase"] == "problem" for p in sc.pushes(run(engine, sc.main_floor("paused"), at)))
+    assert "vacuum.main_floor" in engine.records
+    run(engine, sc.main_floor(), 300)
+    (push,) = sc.pushes(run(engine, sc.main_floor(), 340))
+    assert push.content["phase"] == "running" and engine.records == {}
+
+
+def test_a_paused_dishwasher_whose_problem_clears_keeps_its_card_until_it_runs() -> None:
+    """Fails without the narrowing: a paused dishwasher counted as running."""
+    engine = Engine()
+    tasked(engine, "dishwasher", "dishwasher.action_required")
+    run(engine, sc.states(sensor__dishwasher_operation_state=("actionrequired", {}, NOW - 60)))
+    for at in (20, 80, 200):
+        assert all(p.content["phase"] == "problem" for p in sc.pushes(run(engine, sc.dishwasher("pause"), at)))
+    assert "dishwasher" in engine.records
+    run(engine, sc.dishwasher("run"), 300)
+    (push,) = sc.pushes(run(engine, sc.dishwasher("run"), 340))
+    assert push.content["phase"] == "running" and engine.records == {}
+
+
+def test_one_clear_reading_does_not_end_a_card_and_an_unknown_history_waits_for_the_task() -> None:
+    """Fails without the confirmation and the history: a single snapshot, or a stored record with no history, ended it."""
+    engine = Engine()
+    tasked(engine, "vacuum.main_floor", "navigation.stuck")
+    run(engine, sc.main_floor_issue("navigation.stuck"))
+    run(engine, DOCKED, 20)
+    run(engine, sc.main_floor(), 60)  # one clear reading while it runs
+    plan = run(engine, sc.main_floor_issue("navigation.stuck"), 70)  # the issue comes back
+    assert "vacuum.main_floor" in engine.records
+    assert all(p.content["phase"] == "problem" for p in sc.pushes(plan))
+    # A restart: the record is back from the store with no history (an older record), and the robot is cleaning.
+    restarted = Engine()
+    tasked(restarted, "vacuum.main_floor", "navigation.stuck")
+    restarted.records["vacuum.main_floor"].sensor_seen = True
+    for at in (0, 60, 300):
+        run(restarted, sc.main_floor(), at)
+    assert "vacuum.main_floor" in restarted.records and not restarted.records["vacuum.main_floor"].seen_idle
+    # Within the start-up hold nothing ends, even with the history known.
+    held = Engine()
+    tasked(held, "vacuum.main_floor", "navigation.stuck")
+    held.records["vacuum.main_floor"].sensor_seen = held.records["vacuum.main_floor"].seen_idle = True
+    held.hold_until = NOW + 500
+    for at in (0, 60, 300):
+        run(held, sc.main_floor(), at)
+    assert "vacuum.main_floor" in held.records
 
 
 def test_a_problem_that_still_shows_its_issue_stays_a_problem_while_the_device_runs() -> None:
     engine = Engine()
-    engine.raise_problem("vacuum.main_floor", "navigation.stuck", None, NOW, task_title="Main Floor Vacuum · Robot Stuck")
-    engine.records["vacuum.main_floor"].task_id = 4217
+    tasked(engine, "vacuum.main_floor", "navigation.stuck")
     run(engine, sc.main_floor_issue("navigation.stuck"))
     # Cleaning, but the sensors still report the issue: the problem is not over.
-    (push,) = sc.pushes(run(engine, sc.main_floor_issue("navigation.stuck", vac="cleaning"), 60))
-    assert push.content["phase"] == "problem"
+    for at in (60, 200):
+        plan = run(engine, sc.main_floor_issue("navigation.stuck", vac="cleaning"), at)
+        assert all(p.content["phase"] == "problem" for p in sc.pushes(plan)) and sc.ends(plan) == []
     assert "vacuum.main_floor" in engine.records
 
 

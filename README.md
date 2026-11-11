@@ -101,14 +101,16 @@ data:
 People with the app see a card (red with a sound when the robot stopped, amber and silent when it carries on). Everyone
 else gets the ordinary notification through their own notify action (`notify.stephen_s_phone`; the pattern is an
 option). The card stays until the Donetick task is completed, by Home Assistant, a person or the card's own **Done**
-button, or until the device's issue is clear and the device is running its job again; the card then shows the job and
-ends when the job does, and the task stays open. The notification is cleared when the problem ends. An issue that has
-only cleared (a robot's error clears seconds after it docks) does not end the card by itself. A problem with no task
-ends when the condition clears.
+button, or earlier in one case: the sensors reported the problem, the device was then seen not running, and now its issue
+is clear and it has been running its job for half a minute. The card then shows the job and ends when the job does, and
+the task stays open. A device that is paused or waiting does not count as running. A problem the sensors never reported
+(such as a rinse aid refill raised during a run), or one whose history is unknown after an upgrade, waits for its task.
+The history is stored with the problem, so it survives a restart and a reload; the half minute starts again after
+either. The notification is cleared when the problem ends. A problem with no task ends when the condition clears.
 
 Every button press and every card start, update and end writes one info line to the log (`fenton_home.press tag=… control=…
-user=… outcome=confirmed|timed out|refused|service error`, `fenton_home.card start|update|end tag=…`); no payload body or
-webhook id is logged.
+user=… outcome=confirmed|timed out|refused|service error`, `fenton_home.card start|update|end tag=…`). These new lines carry
+no payload body and no webhook id; older warnings elsewhere may still name a device.
 
 ## Options
 

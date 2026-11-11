@@ -491,16 +491,25 @@ async def test_a_task_completed_elsewhere_ends_the_card_while_a_docked_robot_kee
 
 
 async def test_a_recovered_robot_that_cleans_again_ends_the_problem_and_shows_the_job(hass: HomeAssistant, world) -> None:
+    """Fails without the early-end rule (the card stayed a problem card for good) and without the history check."""
     world.donetick.add("Main Floor Vacuum · Robot Stuck", 4217)
     stuck(hass)
     await hass.services.async_call("fenton_home", "problem", PROBLEM, blocking=True)
     await settle(hass)
+    clear = {"current_issue": {"status": "clear"}}
+    hass.states.async_set("vacuum.valetudo_exaltedsneakydeer", "docked")
+    hass.states.async_set("sensor.main_floor_vacuum_status", "ok", clear)
+    await settle(hass)
     hass.states.async_set("vacuum.valetudo_exaltedsneakydeer", "cleaning")
-    hass.states.async_set("sensor.main_floor_vacuum_status", "ok", {"current_issue": {"status": "clear"}})
+    await settle(hass)
+    assert sent(world, "hook-stephen-iphone")[-1]["data"]["fenton_activity"]["phase"] == "problem", "one reading is not enough"
+    world.live.now = lambda: time.time() + 40  # it has kept cleaning with no issue
+    world.live.request()
     await settle(hass)
     last = sent(world, "hook-stephen-iphone")[-1]["data"]["fenton_activity"]
     assert last["phase"] == "running", "the job card is back while the task is still open"
     assert world.phones.sent[-1]["message"] == "clear_notification"
+    assert world.donetick.completed == []
 
 
 async def test_done_continues_when_donetick_errors_and_reports_when_it_never_completes(hass: HomeAssistant, world) -> None:
