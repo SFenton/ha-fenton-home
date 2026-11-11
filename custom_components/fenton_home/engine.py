@@ -36,6 +36,8 @@ _LOGGER = logging.getLogger(__name__)
 STALE_GRACE = 600
 #: A notice that has not found its moment to be sent (coalescing) is dropped after this long.
 NOTICE_SECONDS = 30.0
+#: How long a device must keep running with its issue clear before its tasked problem ends early.
+RESUME_CONFIRM_SECONDS = 30.0
 CRITICAL_SCORE = 100.0
 WARNING_SCORE = 90.0
 
@@ -238,6 +240,9 @@ class Engine:
         #: Until this time (Unix seconds) a card with no job is kept rather than ended: Home Assistant has only just
         #: started and the entities of other integrations may not be there yet.
         self.hold_until = 0.0
+        #: Device -> when its tasked problem first read "issue clear and the device running". Not stored: a restart
+        #: starts the confirmation again.
+        self._resumed_since: dict[str, float] = {}
 
     # -- problems ----------------------------------------------------------------------------------------------------
 
@@ -264,7 +269,16 @@ class Engine:
         self._log_unmapped(code, raw)
         return record
 
-    def _sync_problems(self, found: list, now: float) -> None:
+    def _sync_problems(self, found: list, now: float, running: frozenset[str] = frozenset()) -> None:
+        """Open, update and end problem records.
+
+        ``running`` holds the devices that are actively doing their job (phase ``running``; paused and waiting do not
+        count). A problem with a linked task lives until the task is completed. It also ends early when all of this
+        holds: the sensors once reported the problem, the device was seen not running after that (``seen_idle``), and
+        the issue is now clear while the device has been running for ``RESUME_CONFIRM_SECONDS`` (and Home Assistant
+        is past its start-up hold). The card then shows the job; the task stays open. A problem the sensors never
+        reported, or whose history is unknown (a stored record from before this rule), waits for its task.
+        """
         by_job = {signal.job_id: signal for signal in found}
         for job_id in list(self.suppressed):
             if job_id not in by_job:
@@ -285,14 +299,23 @@ class Engine:
                 record.room = signal.room or record.room
                 record.since = record.since or signal.since
         for job_id, record in list(self.records.items()):
+            if record.sensor_seen and job_id not in running:
+                record.seen_idle = True
+            resumed = (record.task_id is not None and record.seen_idle and job_id in running
+                       and job_id not in by_job and now >= self.hold_until)
+            if not resumed:
+                self._resumed_since.pop(job_id, None)
+            elif job_id not in self._resumed_since:
+                self._resumed_since[job_id] = now
             if record.task_id is not None:
-                gone = record.task_completed
+                gone = record.task_completed or (resumed and now - self._resumed_since[job_id] >= RESUME_CONFIRM_SECONDS)
             elif record.awaiting_task(now):
                 gone = False
             else:
                 gone = job_id not in by_job and (record.source == "sensor" or record.sensor_seen
                                                   or now - record.created > PROBLEM_GRACE_SECONDS)
             if gone:
+                self._resumed_since.pop(job_id, None)
                 self.ended_records.append(self.records.pop(job_id))
                 if record.task_completed and job_id in by_job:
                     self.suppressed[job_id] = record.code
@@ -328,7 +351,8 @@ class Engine:
         ctx = Ctx(tz=ctx.tz, people=ctx.people, memory=self.memory, enabled=ctx.enabled)
         note_hot_flash(self.memory, states)
         jobs = derive(states, now, ctx)
-        self._sync_problems(signals(states, now, ctx), now)
+        self._sync_problems(signals(states, now, ctx), now,
+                            frozenset(job.job_id for job in jobs if not job.complete and job.phase == "running"))
 
         running = {(job.tag, audience_key(job)): job for job in jobs if not job.complete}
         cards: list[JobState] = [job for job in jobs if not job.complete]
@@ -414,6 +438,8 @@ class Engine:
             if webhook_id not in eligible:
                 plan.actions.append(End(webhook_id, tag, "not eligible"))
                 self._ended((webhook_id, tag), now)
+        for since in self._resumed_since.values():
+            plan.wake(max(since + RESUME_CONFIRM_SECONDS - now, 0.0) + 1.0)
         self.urgent_tags -= {action.tag for action in plan.actions if isinstance(action, Push)}
         sent_to = {(a.tag, r.user_id) for a in plan.actions if isinstance(a, Push)
                    for r in registrations if r.webhook_id == a.webhook_id}

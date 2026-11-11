@@ -3,7 +3,8 @@ problem:
   description: >-
     Shows a problem card on the Live Activities of people who have S+H, and sends the ordinary notification to
     everyone else through their own notify action. The card follows the Donetick task with the given title and ends
-    on every device when the task is completed (or, for a problem with no task, when the condition clears).
+    on every device when the task is completed, or, if the sensors reported the problem and the device was then seen not running, when its issue
+    is clear and it is running its job again (the task stays open). A problem with no task ends when the condition clears.
   fields:
     device:
       name: Device
