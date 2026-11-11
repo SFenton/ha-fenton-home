@@ -101,7 +101,14 @@ data:
 People with the app see a card (red with a sound when the robot stopped, amber and silent when it carries on). Everyone
 else gets the ordinary notification through their own notify action (`notify.stephen_s_phone`; the pattern is an
 option). The card stays until the Donetick task is completed, by Home Assistant, a person or the card's own **Done**
-button, and the notification is cleared when it ends. A problem with no task ends when the condition clears.
+button, or until the device's issue is clear and the device is running its job again; the card then shows the job and
+ends when the job does, and the task stays open. The notification is cleared when the problem ends. An issue that has
+only cleared (a robot's error clears seconds after it docks) does not end the card by itself. A problem with no task
+ends when the condition clears.
+
+Every button press and every card start, update and end writes one info line to the log (`fenton_home.press tag=… control=…
+user=… outcome=confirmed|timed out|refused|service error`, `fenton_home.card start|update|end tag=…`); no payload body or
+webhook id is logged.
 
 ## Options
 

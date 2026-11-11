@@ -264,7 +264,14 @@ class Engine:
         self._log_unmapped(code, raw)
         return record
 
-    def _sync_problems(self, found: list, now: float) -> None:
+    def _sync_problems(self, found: list, now: float, running: frozenset[str] = frozenset()) -> None:
+        """Open, update and end problem records.
+
+        ``running`` holds the devices that are running their job right now. A problem with a linked task lives until
+        the task is completed, or until its device's issue is clear and the device runs its job again (the card then
+        shows the job and ends with it; the task stays open). Issue-clear alone never ends it: a robot's error clears
+        seconds after it docks.
+        """
         by_job = {signal.job_id: signal for signal in found}
         for job_id in list(self.suppressed):
             if job_id not in by_job:
@@ -286,7 +293,7 @@ class Engine:
                 record.since = record.since or signal.since
         for job_id, record in list(self.records.items()):
             if record.task_id is not None:
-                gone = record.task_completed
+                gone = record.task_completed or (job_id in running and job_id not in by_job)
             elif record.awaiting_task(now):
                 gone = False
             else:
@@ -328,7 +335,8 @@ class Engine:
         ctx = Ctx(tz=ctx.tz, people=ctx.people, memory=self.memory, enabled=ctx.enabled)
         note_hot_flash(self.memory, states)
         jobs = derive(states, now, ctx)
-        self._sync_problems(signals(states, now, ctx), now)
+        self._sync_problems(signals(states, now, ctx), now,
+                            frozenset(job.job_id for job in jobs if not job.complete))
 
         running = {(job.tag, audience_key(job)): job for job in jobs if not job.complete}
         cards: list[JobState] = [job for job in jobs if not job.complete]

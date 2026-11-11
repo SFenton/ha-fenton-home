@@ -33,7 +33,7 @@ from .const import (
     EVENT_DISMISSED,
     SENSOR_JOBS,
 )
-from .engine import Card, Engine, Plan, Push, Registration, pick, service_data
+from .engine import Card, Engine, End, Plan, Push, Registration, pick, service_data
 from .entities import (
     AWAY_STATUS,
     CONFIRM_TIMEOUT,
@@ -60,6 +60,20 @@ from .snapshot import States
 from .targets import Device, live_devices, people
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _log_press(tag: str, control: str, user_id: str | None, outcome: str) -> None:
+    """One info line per button press: the card's tag, the control, the Home Assistant user id and how it ended."""
+    _LOGGER.info("fenton_home.press tag=%s control=%s user=%s outcome=%s", tag, control, user_id or "none", outcome)
+
+
+def _log_planned(action: Push | End) -> None:
+    """One info line per planned start, update and end of a card (tag and phase or reason only, never the payload)."""
+    if isinstance(action, End):
+        _LOGGER.info("fenton_home.card end tag=%s reason=%s", action.tag, action.reason)
+    else:
+        _LOGGER.info("fenton_home.card %s tag=%s phase=%s alert=%s", "start" if action.first else "update", action.tag,
+                     action.content.get("phase"), action.alert)
 
 STORE_VERSION = 1
 LOOKUP_INTERVAL = 2.5
@@ -325,6 +339,7 @@ class LiveJobs:
         devices = {d.webhook_id: d for d in live_devices(self.hass, self.runtime.bundle_id)}
         for action in plan.actions:
             device = devices.get(action.webhook_id)
+            _log_planned(action)
             try:
                 sent = device is not None and await send_to_device(
                     self.hass, device, action.webhook_id, service_data(action), actions)
@@ -390,10 +405,12 @@ class LiveJobs:
             return
         if not user_id:
             _LOGGER.warning("Ignoring %s %s: the event has no user", tag, control_id)
+            _log_press(tag, control_id, None, "refused")
             return
         regs = [r for r in self.registrations() if r.user_id == user_id]
         if not regs:
             _LOGGER.warning("Ignoring %s %s: user %s has no card-capable registration", tag, control_id, user_id)
+            _log_press(tag, control_id, user_id, "refused")
             return
         now = self.now()
         self.engine.refresh(self._snapshot(), now, self._ctx())
@@ -401,29 +418,34 @@ class LiveJobs:
         control = job.control(control_id) if job else None
         if control is None:
             _LOGGER.info("%s no longer offers %s", tag, control_id)
+            _log_press(tag, control_id, user_id, "refused")
             self.engine.set_notice(tag, user_id, "No longer available", self.now())
             self.engine.mark_urgent(tag)
             await self.run_now()
             return
         # The state change the press causes is the confirmation: its push goes at priority 10.
         self.engine.mark_urgent(tag)
-        if not await self._press(control, job, user_id):
+        outcome = await self._press(control, job, user_id)
+        _log_press(tag, control_id, user_id, outcome)
+        if outcome != "confirmed":
             self.engine.set_notice(tag, user_id, f"Couldn't {control.verb or control.title.lower()}. Try again.",
                                    self.now())
         await self.run_now()
 
-    async def _press(self, control: Control, job: JobState, user_id: str) -> bool:
+    async def _press(self, control: Control, job: JobState, user_id: str) -> str:
+        """Run a button's actions. Returns ``confirmed``, ``timed out`` or ``service error``."""
         context = Context(user_id=user_id)
         try:
             if control.confirm == "task":
-                return await self._complete_task(control, job, user_id, context)
+                done = await self._complete_task(control, job, user_id, context)
+                return "confirmed" if done else "timed out"
             for call in control.calls:
                 await self.hass.services.async_call(call.domain, call.service, dict(call.data), blocking=True,
                                                     context=context)
         except HomeAssistantError as err:
             _LOGGER.warning("%s on %s failed: %s", control.id, job.tag, err)
-            return False
-        return await self.wait_for(control.expect, self.confirm_timeout)
+            return "service error"
+        return "confirmed" if await self.wait_for(control.expect, self.confirm_timeout) else "timed out"
 
     async def _complete_task(self, control: Control, job: JobState, user_id: str, context: Context) -> bool:
         task_id = control.calls[0].data["task_id"]

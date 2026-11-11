@@ -438,26 +438,57 @@ def test_an_unmapped_error_is_quoted_logged_once_and_has_no_chips_or_done(caplog
     assert caplog.text.count("fenton_home.problem_unmapped") == 1
 
 
-def test_a_service_raised_problem_with_a_task_stays_until_the_task_is_completed() -> None:
+def test_a_service_raised_problem_with_a_task_stays_while_the_device_runs_no_job() -> None:
     engine = Engine()
     engine.raise_problem("vacuum.main_floor", "navigation.stuck", None, NOW, task_title="Main Floor Vacuum · Robot Stuck",
                          push_tag="vacuum-kitchen-error")
     record = engine.records["vacuum.main_floor"]
     record.task_id = 4217
-    stuck = sc.main_floor_issue("navigation.stuck")
-    (push,) = sc.pushes(run(engine, stuck))
+    (push,) = sc.pushes(run(engine, sc.main_floor_issue("navigation.stuck")))
     assert [c["id"] for c in push.content["controls"]] == ["resume", "dock", "done"]
     assert push.content["problem"]["task_id"] == 4217
-    # The robot recovers and is cleaning again; the task is still open, so the card stays a problem card.
-    still = run(engine, sc.main_floor(), 60)
+    # The robot is docked and the issue is clear, but no job runs and the task is open: the problem card stays.
+    docked = sc.main_floor("docked", room_id="", phase="idle", auto=False)
+    still = run(engine, docked, 60)
     assert all(p.content["phase"] == "problem" for p in sc.pushes(still))
     assert sc.ends(still) == []
     # The task is completed (by Home Assistant, a person or Done): the card ends everywhere.
     record.task_completed = True
-    plan = run(engine, sc.main_floor(), 120)
-    assert len(sc.pushes(plan)) == 1 and sc.pushes(plan)[0].content["phase"] == "running"
+    plan = run(engine, docked, 120)
+    assert [e.reason for e in sc.ends(plan)] == ["gone"]
     assert engine.records == {}
     assert [r.push_tag for r in engine.take_ended_records()] == ["vacuum-kitchen-error"]
+
+
+def test_a_problem_with_a_task_ends_when_the_issue_is_clear_and_the_device_runs_its_job_again() -> None:
+    engine = Engine()
+    engine.raise_problem("vacuum.main_floor", "mop.clean_water_empty", None, NOW, task_title="Main Floor Vacuum · Clean Water",
+                         push_tag="vacuum-clean-water")
+    engine.records["vacuum.main_floor"].task_id = 4217
+    docked = sc.main_floor("docked", room_id="", phase="idle", auto=False)
+    # Docked with the error already cleared (it clears seconds after the dock): not enough to end the card.
+    (push,) = sc.pushes(run(engine, docked))
+    assert push.content["phase"] == "problem"
+    # The robot cleans again with no issue: the job card returns and the problem ends; the task stays open.
+    (running,) = sc.pushes(run(engine, sc.main_floor(), 60))
+    assert running.content["phase"] == "running" and not running.alert
+    assert engine.records == {}
+    assert [r.push_tag for r in engine.take_ended_records()] == ["vacuum-clean-water"]
+    assert running.content["controls"] and "done" not in [c["id"] for c in running.content["controls"]]
+    # The job finishes like any other job.
+    finished = run(engine, docked, 600)
+    assert sc.ends(finished) or all(p.content["phase"] != "problem" for p in sc.pushes(finished))
+
+
+def test_a_problem_that_still_shows_its_issue_stays_a_problem_while_the_device_runs() -> None:
+    engine = Engine()
+    engine.raise_problem("vacuum.main_floor", "navigation.stuck", None, NOW, task_title="Main Floor Vacuum · Robot Stuck")
+    engine.records["vacuum.main_floor"].task_id = 4217
+    run(engine, sc.main_floor_issue("navigation.stuck"))
+    # Cleaning, but the sensors still report the issue: the problem is not over.
+    (push,) = sc.pushes(run(engine, sc.main_floor_issue("navigation.stuck", vac="cleaning"), 60))
+    assert push.content["phase"] == "problem"
+    assert "vacuum.main_floor" in engine.records
 
 
 def test_done_on_a_robot_that_is_still_stuck_does_not_bring_the_card_straight_back() -> None:

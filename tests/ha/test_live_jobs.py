@@ -269,6 +269,41 @@ async def test_a_stop_that_never_takes_effect_pushes_the_real_state_with_a_notic
     assert all("notice" not in s["data"]["fenton_activity"] for s in sent(world, since=count))
 
 
+async def test_each_press_and_each_card_start_update_and_end_is_logged_once(hass: HomeAssistant, world, caplog) -> None:
+    caplog.set_level("INFO", logger="custom_components.fenton_home.live_jobs")
+    register_script(hass)
+    start_fan(hass)
+    await settle(hass)
+    await press(hass, "job.fan.guest", "stop")
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("fenton_home.")]
+    assert "fenton_home.card start tag=job.fan.guest phase=running alert=False" in lines
+    assert f"fenton_home.press tag=job.fan.guest control=stop user={STEPHEN} outcome=confirmed" in lines
+    assert any(line.startswith("fenton_home.card end tag=job.fan.guest reason=") for line in lines)
+    assert "hook-" not in caplog.text, "no webhook id (a secret) in a log line"
+
+
+async def test_a_press_that_times_out_logs_the_outcome(hass: HomeAssistant, world, caplog) -> None:
+    caplog.set_level("INFO", logger="custom_components.fenton_home.live_jobs")
+    register_script(hass, works=False)
+    start_fan(hass)
+    await settle(hass)
+    await press(hass, "job.fan.guest", "stop")
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("fenton_home.press")]
+    assert lines == [f"fenton_home.press tag=job.fan.guest control=stop user={STEPHEN} outcome=timed out"]
+
+
+async def test_a_press_that_raises_or_is_refused_logs_the_outcome(hass: HomeAssistant, world, caplog) -> None:
+    caplog.set_level("INFO", logger="custom_components.fenton_home.live_jobs")
+    register_script(hass, raises=True)
+    start_fan(hass)
+    await settle(hass)
+    await press(hass, "job.fan.guest", "stop")
+    await press(hass, "job.fan.guest", "self_destruct")
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("fenton_home.press")]
+    assert lines == [f"fenton_home.press tag=job.fan.guest control=stop user={STEPHEN} outcome=service error",
+                     f"fenton_home.press tag=job.fan.guest control=self_destruct user={STEPHEN} outcome=refused"]
+
+
 async def test_a_service_error_is_reported_the_same_way(hass: HomeAssistant, world) -> None:
     register_script(hass, raises=True)
     start_fan(hass)
@@ -437,22 +472,34 @@ async def test_done_completes_the_task_ends_the_card_everywhere_and_clears_the_f
     assert hass.states.get(SENSOR_JOBS).state == "0"
 
 
-async def test_a_task_completed_elsewhere_ends_the_card_and_a_recovered_robot_keeps_it_until_then(hass: HomeAssistant,
-                                                                                                  world) -> None:
+async def test_a_task_completed_elsewhere_ends_the_card_while_a_docked_robot_keeps_it_until_then(hass: HomeAssistant,
+                                                                                                world) -> None:
     world.donetick.add("Main Floor Vacuum · Robot Stuck", 4217)
     stuck(hass)
     await hass.services.async_call("fenton_home", "problem", PROBLEM, blocking=True)
     await settle(hass)
-    # The robot recovers and cleans on; the task is still open.
-    hass.states.async_set("vacuum.valetudo_exaltedsneakydeer", "cleaning")
+    # The robot recovers and docks with no job running; the task is still open, so the problem card stays.
+    hass.states.async_set("vacuum.valetudo_exaltedsneakydeer", "docked")
     hass.states.async_set("sensor.main_floor_vacuum_status", "ok", {"current_issue": {"status": "clear"}})
     await settle(hass)
     assert sent(world, "hook-stephen-iphone")[-1]["data"]["fenton_activity"]["phase"] == "problem"
     count = len(world.service.sent)
     world.donetick.finish(4217)  # Home Assistant auto-completes it, or a person does in Donetick
     await settle(hass)
-    last = sent(world, "hook-stephen-iphone", since=count)[-1]["data"]["fenton_activity"]
-    assert last["phase"] == "running", "the job card is back"
+    assert world.phones.sent[-1]["message"] == "clear_notification"
+    assert [s["message"] for s in sent(world, since=count)] == ["clear_notification", "clear_notification"]
+
+
+async def test_a_recovered_robot_that_cleans_again_ends_the_problem_and_shows_the_job(hass: HomeAssistant, world) -> None:
+    world.donetick.add("Main Floor Vacuum · Robot Stuck", 4217)
+    stuck(hass)
+    await hass.services.async_call("fenton_home", "problem", PROBLEM, blocking=True)
+    await settle(hass)
+    hass.states.async_set("vacuum.valetudo_exaltedsneakydeer", "cleaning")
+    hass.states.async_set("sensor.main_floor_vacuum_status", "ok", {"current_issue": {"status": "clear"}})
+    await settle(hass)
+    last = sent(world, "hook-stephen-iphone")[-1]["data"]["fenton_activity"]
+    assert last["phase"] == "running", "the job card is back while the task is still open"
     assert world.phones.sent[-1]["message"] == "clear_notification"
 
 
