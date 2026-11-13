@@ -300,7 +300,7 @@ Why 60 s: the recorder for 2026-11-06 to 2026-11-13 shows the music-room robot p
 2026-11-13 the segment read Music Room, then another room for 10 min 10 s, Music Room for 20 s, a third room for
 7 min 30 s, then Music Room again, so the card ended and restarted four times, and once more within half a second of
 03:00:00 (the vacuum read `cleaning` 8 ms before its flag read `segment`). The main-floor robot's own estimate (it has a coordinator, so it is unchanged) shows the same transits: 4 to 38 s
-through a hallway or doorway, and stays of two minutes or more. The shortest stay on the music-room robot was 87 s
+through a hallway or doorway, and real stays mostly of several minutes. The shortest stay on the music-room robot was 87 s
 (2026-11-11), so 60 s is above every transit seen (30 s, twice that with margin) and below every stay, and a room shows
 within a minute of the robot settling in it.
 
