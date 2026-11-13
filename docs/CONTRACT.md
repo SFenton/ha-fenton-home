@@ -269,6 +269,22 @@ At the relay, an update for such a registration whose activity token core has no
 `live_activity_token`: it is dropped with `201` (section 6), so nothing fails and the engine still counts the card as
 shown. A `410` for an update with no start token to restart from is reported as before; the stored token is removed.
 
+### Orphaned activities
+
+When a phone reports a `job.*` activity's update token (the app's `live_activity_token` webhook) for a registration of
+this app on which the engine shows no card with that tag, the engine ends that activity at once (`clear_notification`;
+the end dismisses immediately, section 7 "Content state"). This repairs an end that went out before the app had reported
+the token, which could not reach the phone, and any other activity the engine lost track of.
+
+Core fires no event for the report, so the integration wraps the function core's webhook handler stores it with
+(`mobile_app.live_activity.webhook.store_live_activity_token`; guarded the same way as the dead-token store above) and
+also looks at core's token store on every engine cycle. It never ends: a card the engine shows or has just started
+(`engine.cards` already holds it), an activity whose end the same cycle sends, anything while Home Assistant is starting
+(`hold_until`, which also covers cards recovered after a restart), a tag that is not `job.*` (the aggregate Home
+activity), or a token that has expired. A card the person swiped away is not in `engine.cards` either, so a late token
+report for it ends it again, which is harmless. A token that stays after an end (the end failed) is ended again after
+ten minutes, or at once when the phone reports a new token.
+
 ### Attributes (sent on a start)
 
 `{tag, title, kind, symbol, tint}`. `title` is the notification title (the device's name, capped at 32 characters);

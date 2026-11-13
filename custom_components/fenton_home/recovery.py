@@ -15,15 +15,18 @@ from __future__ import annotations
 import importlib
 import inspect
 import logging
+import time
+from collections.abc import Callable
 from typing import Any
 
 from homeassistant.const import __version__ as HA_VERSION  # noqa: N812
-from homeassistant.core import HomeAssistant
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
 
 STORE_MODULE = "homeassistant.components.mobile_app.live_activity.store"
 CONST_MODULE = "homeassistant.components.mobile_app.const"
+WEBHOOK_MODULE = "homeassistant.components.mobile_app.live_activity.webhook"
 #: The first Home Assistant release with ``mobile_app`` Live Activities.
 MIN_VERSION = (2026, 7)
 
@@ -84,3 +87,81 @@ def has_token(hass: HomeAssistant, webhook_id: str, tag: str) -> bool | None:
     except (ImportError, AttributeError, KeyError, TypeError) as err:
         _warn_once(str(err))
         return None
+
+
+def stored_tokens(hass: HomeAssistant) -> dict[str, dict[str, str]] | None:
+    """Core's unexpired per-activity tokens as ``{webhook_id: {tag: token}}``; None when the store can't be read."""
+    if not _supported():
+        return None
+    try:
+        const = importlib.import_module(CONST_MODULE)
+        held: dict[str, dict[str, dict[str, Any]]] = hass.data[const.DOMAIN][const.DATA_LIVE_ACTIVITY_TOKENS]
+        token_key = getattr(const, "ATTR_TOKEN", "token")
+        expiry_key = getattr(const, "ATTR_LIVE_ACTIVITY_EXPIRES_AT", "expires_at")
+        now = time.time()
+        found: dict[str, dict[str, str]] = {}
+        for webhook_id, tags in held.items():
+            live = {tag: str(item[token_key]) for tag, item in tags.items() if item[expiry_key] > now}
+            if live:
+                found[webhook_id] = live
+        return found
+    except (ImportError, AttributeError, KeyError, TypeError) as err:
+        _warn_once(str(err))
+        return None
+
+
+# -- Watching token reports -------------------------------------------------------------------------------------------
+
+#: Called as ``listener(webhook_id, tag)`` whenever a phone reports an activity's update token.
+Listener = Callable[[str, str], None]
+_listeners: list[Listener] = []
+_patched: dict[str, Any] = {}
+
+
+def _wrap_store(original: Callable[..., Any]) -> Callable[..., Any]:
+    def store_live_activity_token(hass: HomeAssistant, webhook_id: str, activity_tag: str, token: str,
+                                  expires_at: float) -> None:
+        original(hass, webhook_id, activity_tag, token, expires_at)
+        for listener in list(_listeners):
+            try:
+                listener(webhook_id, activity_tag)
+            except Exception:  # noqa: BLE001 - a listener must never break core's webhook
+                _LOGGER.exception("Live Activity token listener failed")
+
+    return store_live_activity_token
+
+
+def watch_reports(listener: Listener) -> CALLBACK_TYPE | None:
+    """Call ``listener(webhook_id, tag)`` after core stores a token a phone reported; returns the way to stop.
+
+    Core fires no event when the app posts ``live_activity_token``, so this wraps the function its webhook handler
+    calls to store it. Guarded like the rest of this module: None (and one log line) when core doesn't look like
+    2026.7's, and the engine's own cycles still find orphans, only later.
+    """
+    if not _supported():
+        return None
+    if not _patched:
+        try:
+            module = importlib.import_module(WEBHOOK_MODULE)
+            original = module.store_live_activity_token
+            names = list(inspect.signature(original).parameters)
+            if len(names) != 5:
+                raise TypeError(f"store_live_activity_token takes {names}")
+        except (ImportError, AttributeError, TypeError, ValueError) as err:
+            _warn_once(str(err))
+            return None
+        wrapper = _wrap_store(original)
+        module.store_live_activity_token = wrapper
+        _patched.update(module=module, original=original, wrapper=wrapper)
+    _listeners.append(listener)
+
+    def stop() -> None:
+        if listener in _listeners:
+            _listeners.remove(listener)
+        if not _listeners and _patched:
+            module = _patched.pop("module")
+            original, wrapper = _patched.pop("original"), _patched.pop("wrapper")
+            if getattr(module, "store_live_activity_token", None) is wrapper:
+                module.store_live_activity_token = original
+
+    return stop
