@@ -25,6 +25,7 @@ from custom_components.fenton_home.const import (
     DOMAIN,
     SENSOR_JOBS,
 )
+from custom_components.fenton_home.entities import SEGMENT_SETTLE_SECONDS
 from custom_components.fenton_home.live_jobs import LiveJobs
 
 from .test_integration import (
@@ -735,6 +736,42 @@ async def test_cards_and_problems_survive_a_restart(hass: HomeAssistant, world, 
     await settle(hass)
     ended = [(s["target"], s["data"]["tag"]) for s in sent(world, since=count) if s["message"] == "clear_notification"]
     assert ("hook-stephen-iphone", "job.fan.guest") in ended
+
+
+async def test_a_manual_vacuum_card_survives_a_restart_in_place_and_still_changes_room_when_one_holds(
+        hass: HomeAssistant, world, hass_storage) -> None:
+    """The card keeps the key it was pushed with (``none:``, before the flag read ``segment``); a restart must not
+    read the run's current key as a new room."""
+    segment = "sensor.music_room_music_room_robot_vacuum_estimated_segment"
+    tag, hook = "job.vacuum.music_room", "hook-stephen-iphone"
+    hass.states.async_set(segment, "Music Room")
+    hass.states.async_set("sensor.valetudo_elatedusedram_status_flag", "none")
+    hass.states.async_set("vacuum.valetudo_elatedusedram", "cleaning")
+    await settle(hass)
+    hass.states.async_set("sensor.valetudo_elatedusedram_status_flag", "segment")
+    await settle(hass)
+    assert world.live.engine.cards[(hook, tag)].session_key == "none:"
+    assert await hass.config_entries.async_unload(world.entry.entry_id)
+    assert {c["session_key"] for c in hass_storage["fenton_home.live_jobs"]["data"]["cards"] if c["tag"] == tag} == {"none:"}
+    count = len(world.service.sent)
+    assert await hass.config_entries.async_setup(world.entry.entry_id)
+    await settle(hass)
+    live = hass.data[DOMAIN][world.entry.entry_id].live
+    live.engine.coalescer.window = 0
+    assert [s for s in sent(world, since=count) if s["message"] == "clear_notification"] == []
+    assert live.engine.cards[(hook, tag)].session_key == "none:", "updated in place, not ended and started again"
+    # A new room that holds for the settle time still ends the card and starts another.
+    start = time.time() + 1000
+    live.now = lambda: start
+    hass.states.async_set(segment, "Pantry")
+    await settle(hass)
+    count = len(world.service.sent)
+    live.now = lambda: start + SEGMENT_SETTLE_SECONDS + 1
+    live.request()
+    await settle(hass)
+    messages = [s["message"] for s in sent(world, hook, since=count) if s["data"]["tag"] == tag]
+    assert messages[0] == "clear_notification" and len(messages) == 2
+    assert live.engine.cards[(hook, tag)].session_key == "segment:Pantry"
 
 
 async def test_unload_removes_the_service_and_the_listeners(hass: HomeAssistant, world) -> None:

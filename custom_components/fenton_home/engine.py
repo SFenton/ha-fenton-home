@@ -435,11 +435,12 @@ class Engine:
         """The card for a job whose ``session_key`` changes only when the new key has held for ``settle_seconds``.
 
         A manual vacuum run's key is its status flag and the robot's estimated room. That estimate flips while the robot
-        crosses a doorway, and the flag is set a moment after the robot starts, so each change used to end the card and
-        start another (spec section 0 decision 5 is a real room change). Now:
+        crosses a doorway, and the flag is set a moment after the robot starts. A real room change ends the card and
+        starts another (spec section 0 decision 5); the rest is the sensors catching up.
 
-        - A key that differs from the one last read, within ``settle_seconds`` of the run's first card, is the sensors
-          catching up: the card keeps its identity and updates in place.
+        - A key that differs from the one last read, within ``settle_seconds`` of the run's first card (or of the first
+          refresh after a restart, where the card keeps the key it was restored with), is the sensors catching up: the
+          card keeps its identity and updates in place.
         - Later, a different key must be read, unchanged, for ``settle_seconds``. Until then the card keeps showing the
           room it had (updating phase and controls in place); a flip back, or on to a third room, starts the wait again.
         - When it holds, the card takes the new key, which ends the old card and starts the new one.
@@ -447,8 +448,14 @@ class Engine:
         key = job.session_key
         state = self.settling.get(job.job_id)
         if state is None:
-            self.settling[job.job_id] = Settle(identity=key, seen=key, since=now, shown=job, settle=job.settle_seconds)
-            return job
+            # A card restored after a restart keeps the key it was pushed with, which the run may have moved on from.
+            restored = next((c.session_key for (_, tag), c in self.cards.items() if tag == job.tag and c.session_key), None)
+            identity = restored or key
+            self.settling[job.job_id] = Settle(identity=identity, seen=identity, since=now, shown=job,
+                                               settle=job.settle_seconds)
+            if identity == key:
+                return job
+            state = self.settling[job.job_id]
         state.settle = job.settle_seconds
         if key == state.seen or now - state.since < job.settle_seconds:
             state.seen, state.pending = key, None
