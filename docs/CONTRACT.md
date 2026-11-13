@@ -289,10 +289,10 @@ ten minutes, or at once when the phone reports a new token.
 
 A robot with a coordinator reports its rooms exactly: a new room ends the card and starts another at once. A robot with
 none (the music-room robot) has a manual run whose card is keyed by its status flag and its *estimated segment*, a
-position estimate that flips while the robot crosses a doorway. A change of that key now ends and restarts the card
+position estimate that flips while the robot crosses a doorway. A change of that key ends and restarts the card
 only after the new key has been read unchanged for **60 seconds** (`SEGMENT_SETTLE_SECONDS`); until then the card keeps
 its room and updates in place (pause, resume), and a flip back, or on to a third room, starts the wait again. Within the
-first 60 seconds of a run a change of key is the sensors catching up (the status flag is set a few milliseconds after
+first 60 seconds of a run (or after a restart, from the key the restored card was pushed with) a change of key is the sensors catching up (the status flag is set a few milliseconds after
 the vacuum starts), so it updates the card in place and starts nothing new.
 
 ### Attributes (sent on a start)
