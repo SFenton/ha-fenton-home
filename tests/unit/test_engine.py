@@ -217,6 +217,96 @@ def test_a_vacuum_card_has_no_value_and_no_progress_but_a_short_word() -> None:
     assert problem.content["value"] == {"kind": "text", "text": "Needs help"} and "short" not in problem.content
 
 
+# -- A manual vacuum run's room flips ------------------------------------------------------------------------------------
+
+
+def replay_music_room_run(engine: Engine) -> list:
+    """Run ``sc.MUSIC_ROOM_RUN`` through the engine, also waking whenever the plan asks, to the end of the run.
+
+    Returns ``(seconds, action)`` for every start and end the engine plans.
+    """
+    log: list = []
+    changes = [(at, step) for step, (at, *_rest) in enumerate(sc.MUSIC_ROOM_RUN)]
+    snapshot, wake_at, now = None, None, 0.0
+    while changes or wake_at is not None:
+        due = [changes[0][0]] if changes else []
+        if wake_at is not None:
+            due.append(wake_at)
+        now = min(due)
+        while changes and changes[0][0] <= now:
+            snapshot = sc.music_room_run(changes.pop(0)[1])
+        plan = run(engine, snapshot, now)
+        log.extend((round(now, 3), a) for a in plan.actions if isinstance(a, (Push, End)))
+        wake_at = None if plan.wake_in is None else now + plan.wake_in
+    return log
+
+
+def test_the_recorded_music_room_run_starts_one_card_per_room_that_held() -> None:
+    log = replay_music_room_run(Engine())
+    starts = [(at, a.content["headline"]) for at, a in log if isinstance(a, Push) and a.first]
+    assert [headline for _, headline in starts] == ["Cleaning Music Room", "Vacuuming Pantry", "Vacuuming Hall",
+                                                    "Vacuuming Music Room"]
+    # Each new room waits for the sensors to read it for a minute; the 20 s back in the first room never had a card.
+    assert [round(at) for at, _ in starts] == [0, 126, 756, 1206]
+    ends = [(round(at), a.reason) for at, a in log if isinstance(a, End)]
+    assert ends == [(126, "restart"), (756, "restart"), (1206, "restart"), (6811, "gone")]
+
+
+def test_the_status_flag_catching_up_updates_the_card_in_place() -> None:
+    """03:00:00.592 the vacuum read ``cleaning`` and 8 ms later its flag read ``segment``: that was one start, one end
+    and a second start within half a second."""
+    engine = Engine()
+    (start,) = sc.pushes(run(engine, sc.music_room_run(0), 0))
+    assert start.first and start.content["headline"] == "Cleaning Music Room"
+    plan = run(engine, sc.music_room_run(1), 0.008)
+    assert sc.ends(plan) == [] and not any(p.first for p in sc.pushes(plan))
+    (update,) = sc.pushes(run(engine, sc.music_room_run(1), 3))  # the coalescing window (2 s) has passed
+    assert not update.first and update.content["headline"] == "Vacuuming Music Room"
+    assert next(iter(engine.cards.values())).session_key == "none:"
+
+
+def test_a_room_that_does_not_hold_for_the_window_is_never_shown() -> None:
+    engine = Engine()
+    run(engine, sc.manual_run("music_room", flag="segment", segment="Music Room"), 0)
+    for at, room in ((100, "Pantry"), (159, "Music Room")):  # in the Pantry for 59 s: not a room change
+        plan = run(engine, sc.manual_run("music_room", flag="segment", segment=room), at)
+        assert sc.ends(plan) == [] and not any(p.first for p in sc.pushes(plan))
+    assert run(engine, sc.manual_run("music_room", flag="segment", segment="Music Room"), 400).actions == []
+    held = run(engine, sc.manual_run("music_room", flag="segment", segment="Pantry"), 500)
+    assert sc.ends(held) == [] and held.wake_in == pytest.approx(60)
+    assert [type(a) for a in run(engine, sc.manual_run("music_room", flag="segment", segment="Pantry"), 560).actions] \
+        == [End, Push]
+
+
+def test_while_a_room_change_waits_the_card_keeps_its_room_and_follows_the_robot() -> None:
+    engine = Engine()
+    run(engine, sc.manual_run("music_room", flag="segment", segment="Music Room"), 0)
+    plan = run(engine, sc.manual_run("music_room", flag="segment", segment="Pantry"), 100)
+    assert plan.actions == []
+    (paused,) = sc.pushes(run(engine, sc.manual_run("music_room", flag="segment", segment="Pantry", vac="paused"), 110))
+    assert paused.content["phase"] == "paused" and not paused.first
+    assert next(iter(engine.cards.values())).session_key == "segment:Music Room"
+
+
+def test_a_run_that_ends_while_a_room_change_waits_leaves_nothing_behind() -> None:
+    engine = Engine()
+    run(engine, sc.manual_run("music_room", flag="segment", segment="Music Room"), 0)
+    run(engine, sc.manual_run("music_room", flag="segment", segment="Pantry"), 100)
+    assert [e.reason for e in sc.ends(run(engine, sc.manual_run("music_room", vac="returning"), 120))] == ["gone"]
+    assert engine.settling == {}
+    (again,) = sc.pushes(run(engine, sc.manual_run("music_room", flag="segment", segment="Pantry"), 900))
+    assert again.first and again.content["headline"] == "Vacuuming Pantry"
+
+
+def test_a_robot_with_a_coordinator_still_changes_card_at_once() -> None:
+    """Only the position estimate of a robot with no coordinator needs settling (section 0 decision 5 is unchanged)."""
+    engine = Engine()
+    run(engine, sc.main_floor(room_id="kitchen"))
+    plan = run(engine, sc.main_floor(room_id="hall").with_(
+        sensor__main_floor_vacuum_coordinator_hall_last_cleaned=("x", {"room_name": "Hall"})), 90)
+    assert [type(a) for a in plan.actions] == [End, Push] and engine.settling == {}
+
+
 # -- Restart at 7 h 45 -----------------------------------------------------------------------------------------------
 
 

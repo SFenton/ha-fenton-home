@@ -109,6 +109,10 @@ class JobState:
     linger_holds: bool = False
     #: A change here ends the card and starts a new one (a vacuum's room or segment).
     session_key: str | None = None
+    #: A change of ``session_key`` ends the card and starts another only after the new key has held this long (0: at
+    #: once). Until then the card keeps its room and updates in place. Within this long of the run's start a change is
+    #: the sensors catching up (a status flag that is set a few milliseconds after the vacuum starts), not a new room.
+    settle_seconds: float = 0.0
     #: Person entity ids who see this card; None means everyone with S+H.
     audience: frozenset[str] | None = None
     problem: ProblemInfo | None = None

@@ -71,7 +71,7 @@ Button handlers keep working: the app fires `mobile_app_notification_action` thr
 
 With Live Activities allowed, the app hands Home Assistant a push-to-start token and this integration's job engine
 (`live_jobs.py`) shows each running household job as its own Live Activity, kept current while the app is closed: the
-bathroom fans, the dishwasher, the washer and dryer, the vacuums (one card per room, or per manual run) and a hot flash.
+bathroom fans, the dishwasher, the washer and dryer, the vacuums (one card per room, or per manual run; a robot with no coordinator changes room only once the new room has held for a minute) and a hot flash.
 Cards go to every person with the app, ordered by relevance (the Dynamic Island shows the most relevant), with up to
 four jobs and one problem on a device at a time. A card's Stop, Pause, Resume and Dock buttons run the matching Home
 Assistant action; the card ends once the device confirms. A job that finishes by itself shows **Complete** for five

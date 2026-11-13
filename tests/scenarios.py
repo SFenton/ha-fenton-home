@@ -141,6 +141,26 @@ def robot_error(raw: str, robot: str = "music_room") -> States:
                      f"sensor__valetudo_{rid}_error": (raw, {}, NOW - 60)})
 
 
+#: The music-room robot's run of 2026-11-13, from the recorder: seconds after the vacuum entity read ``cleaning``, the
+#: status flag, and the estimated segment (rooms renamed to ones this file already uses). The vacuum changed 8 ms before
+#: its flag; the segment then left the room for 10 min, came back for 20 s, left again for 7 min 30 s and came back.
+MUSIC_ROOM_RUN = (
+    (0.000, "cleaning", "none", "Music Room"),
+    (0.008, "cleaning", "segment", "Music Room"),
+    (66.029, "cleaning", "segment", "Pantry"),
+    (676.264, "cleaning", "segment", "Music Room"),
+    (696.270, "cleaning", "segment", "Hall"),
+    (1146.442, "cleaning", "segment", "Music Room"),
+    (6811.245, "returning", "resumable", "Music Room"),
+)
+
+
+def music_room_run(step: int) -> States:
+    """The snapshot after the ``step``-th change of ``MUSIC_ROOM_RUN``."""
+    _, vac, flag, segment = MUSIC_ROOM_RUN[step]
+    return manual_run("music_room", flag=flag, vac=vac, segment=segment)
+
+
 # -- Hot flash ----------------------------------------------------------------------------------------------------------
 
 

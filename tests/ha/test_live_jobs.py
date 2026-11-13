@@ -290,6 +290,37 @@ async def test_a_card_ends_as_not_eligible_only_when_the_registration_cannot_pus
     assert ("hook-stephen-ipad", "job.fan.guest") not in world.live.engine.cards
 
 
+# -- A manual vacuum run whose status flag follows the vacuum ----------------------------------------------------------
+
+VACUUM_TAG = "job.vacuum.music_room"
+
+
+def card_pushes(world, webhook: str = "hook-stephen-iphone") -> list[dict[str, Any]]:
+    return [s for s in sent(world, webhook) if s["data"]["tag"] == VACUUM_TAG and s["message"] != "clear_notification"]
+
+
+async def test_a_vacuum_whose_flag_follows_it_by_a_moment_is_one_card_not_a_start_an_end_and_a_start(
+        hass: HomeAssistant, world) -> None:
+    """2026-11-13 03:00:00: the vacuum read ``cleaning`` and 8 ms later its status flag read ``segment``."""
+    segment = "sensor.music_room_music_room_robot_vacuum_estimated_segment"
+    hass.states.async_set(segment, "Music Room")
+    hass.states.async_set("sensor.valetudo_elatedusedram_status_flag", "none")
+    hass.states.async_set("vacuum.valetudo_elatedusedram", "cleaning")
+    await settle(hass)
+    card = world.live.engine.cards[("hook-stephen-iphone", VACUUM_TAG)]
+    assert card_pushes(world)[-1]["data"]["fenton_activity"]["headline"] == "Cleaning Music Room"
+    hass.states.async_set("sensor.valetudo_elatedusedram_status_flag", "segment")
+    await settle(hass)
+    assert card_pushes(world)[-1]["data"]["fenton_activity"]["headline"] == "Vacuuming Music Room"
+    # The robot crosses a doorway for a few seconds and comes back: still the one card.
+    hass.states.async_set(segment, "Pantry")
+    await settle(hass)
+    hass.states.async_set(segment, "Music Room")
+    await settle(hass)
+    assert [s for s in sent(world) if s["message"] == "clear_notification"] == []
+    assert world.live.engine.cards[("hook-stephen-iphone", VACUUM_TAG)] is card and card.session_key == "none:"
+
+
 # -- Buttons ----------------------------------------------------------------------------------------------------------
 
 

@@ -71,6 +71,24 @@ class Card:
     relevance: float = 0.0
 
 
+@dataclass
+class Settle:
+    """What a card with a settling ``session_key`` (a manual vacuum run) carries between refreshes.
+
+    ``identity`` is the session key the card was pushed with, and the one every refresh emits until a new key has held;
+    ``seen`` is the key the sensors read last (the two differ after a refinement within the run's first seconds);
+    ``pending`` is a different key that has not held yet, since ``pending_since``; ``shown`` is the last job accepted.
+    """
+
+    identity: str
+    seen: str
+    since: float
+    shown: JobState
+    settle: float
+    pending: str | None = None
+    pending_since: float = 0.0
+
+
 @dataclass(frozen=True)
 class Push:
     """Send this card to this device (core chooses start or update from the tokens it holds)."""
@@ -248,6 +266,8 @@ class Engine:
         #: Device -> when its tasked problem first read "issue clear and the device running". Not stored: a restart
         #: starts the confirmation again.
         self._resumed_since: dict[str, float] = {}
+        #: Job id -> the settling state of its card (see ``_settle``).
+        self.settling: dict[str, Settle] = {}
 
     # -- problems ----------------------------------------------------------------------------------------------------
 
@@ -355,7 +375,7 @@ class Engine:
         """Recompute the cards that should exist from a snapshot. Returns them (also kept in ``current``)."""
         ctx = Ctx(tz=ctx.tz, people=ctx.people, memory=self.memory, enabled=ctx.enabled)
         note_hot_flash(self.memory, states)
-        jobs = derive(states, now, ctx)
+        jobs = self._settle_all(derive(states, now, ctx), now)
         self._sync_problems(signals(states, now, ctx), now,
                             frozenset(job.job_id for job in jobs if not job.complete and job.phase == "running"))
 
@@ -403,6 +423,50 @@ class Engine:
         self.current = cards
         return cards
 
+    def _settle_all(self, jobs: list[JobState], now: float) -> list[JobState]:
+        """Hold back a change of room that has not held (``JobState.settle_seconds``); forget runs that are over."""
+        settled = [self._settle(job, now) if job.settle_seconds > 0 and job.session_key else job for job in jobs]
+        live = {job.job_id for job in jobs if job.settle_seconds > 0}
+        for job_id in [j for j in self.settling if j not in live]:
+            del self.settling[job_id]
+        return settled
+
+    def _settle(self, job: JobState, now: float) -> JobState:
+        """The card for a job whose ``session_key`` changes only when the new key has held for ``settle_seconds``.
+
+        A manual vacuum run's key is its status flag and the robot's estimated room. That estimate flips while the robot
+        crosses a doorway, and the flag is set a moment after the robot starts, so each change used to end the card and
+        start another (spec section 0 decision 5 is a real room change). Now:
+
+        - A key that differs from the one last read, within ``settle_seconds`` of the run's first card, is the sensors
+          catching up: the card keeps its identity and updates in place.
+        - Later, a different key must be read, unchanged, for ``settle_seconds``. Until then the card keeps showing the
+          room it had (updating phase and controls in place); a flip back, or on to a third room, starts the wait again.
+        - When it holds, the card takes the new key, which ends the old card and starts the new one.
+        """
+        key = job.session_key
+        state = self.settling.get(job.job_id)
+        if state is None:
+            self.settling[job.job_id] = Settle(identity=key, seen=key, since=now, shown=job, settle=job.settle_seconds)
+            return job
+        state.settle = job.settle_seconds
+        if key == state.seen or now - state.since < job.settle_seconds:
+            state.seen, state.pending = key, None
+        else:
+            if state.pending != key:
+                state.pending, state.pending_since = key, now
+            if now - state.pending_since >= job.settle_seconds:
+                state.identity = state.seen = key
+                state.pending = None
+            else:
+                held = state.shown
+                kept = job.with_(session_key=state.identity)
+                if held.phase == job.phase:
+                    kept = kept.with_(headline=held.headline, short=held.short, detail=held.detail)
+                return kept
+        state.shown = job
+        return job.with_(session_key=state.identity)
+
     def _overlay_problems(self, cards: list[JobState], states: States, now: float, tz: tzinfo | None) -> list[JobState]:
         out: list[JobState] = []
         used: set[str] = set()
@@ -445,6 +509,9 @@ class Engine:
                 self._ended((webhook_id, tag), now)
         for since in self._resumed_since.values():
             plan.wake(max(since + RESUME_CONFIRM_SECONDS - now, 0.0) + 1.0)
+        for state in self.settling.values():
+            if state.pending is not None:
+                plan.wake(state.pending_since + state.settle - now)
         self.urgent_tags -= {action.tag for action in plan.actions if isinstance(action, Push)}
         sent_to = {(a.tag, r.user_id) for a in plan.actions if isinstance(a, Push)
                    for r in registrations if r.webhook_id == a.webhook_id}
