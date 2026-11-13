@@ -395,7 +395,8 @@ class LiveJobs:
                 sent = device is not None and await send_to_device(
                     self.hass, device, action.webhook_id, service_data(action), actions)
             except HomeAssistantError as err:
-                _LOGGER.warning("Couldn't send %s to %s: %s", action.tag, action.webhook_id, err)
+                _LOGGER.warning("Couldn't send %s to %s: %s", action.tag, device.name if device else "a device",
+                                type(err).__name__)
                 if isinstance(action, Push):
                     self.engine.push_failed(action.webhook_id, action.tag, now)
                     failed = True
@@ -403,7 +404,8 @@ class LiveJobs:
             if not sent:
                 if action.webhook_id not in self._no_action:
                     self._no_action.add(action.webhook_id)
-                    _LOGGER.warning("No notify action for %s; its %s card isn't sent", action.webhook_id, action.tag)
+                    _LOGGER.warning("No notify action for %s; its %s card isn't sent",
+                                    device.name if device else "a device", action.tag)
                 if isinstance(action, Push):
                     self.engine.push_failed(action.webhook_id, action.tag, now)
                     failed = True

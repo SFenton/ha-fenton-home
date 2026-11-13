@@ -212,7 +212,7 @@ async def test_a_missing_notify_action_is_logged_and_retried(hass: HomeAssistant
     world.service.unregistered.add("hook-nameless")  # mobile_app has no entry for it
     start_fan(hass)
     await settle(hass)
-    assert "No notify action for hook-nameless" in caplog.text
+    assert "No notify action for hook-nameless · Fenton" in caplog.text
     assert {s["target"] for s in sent(world)} == {"hook-stephen-iphone", "hook-stephen-ipad"}
 
 
@@ -338,6 +338,21 @@ async def test_stop_runs_the_script_waits_for_the_state_and_the_card_goes(hass: 
     await press(hass, "job.fan.guest", "stop")
     assert calls == [{"command": "power", "target_power": "off", "user_id": STEPHEN}]
     assert [s["message"] for s in sent(world, since=count)] == ["clear_notification", "clear_notification"]
+
+
+async def test_a_press_from_phones_that_lost_their_start_token_works_for_the_card_they_show(hass: HomeAssistant,
+                                                                                            world, caplog) -> None:
+    calls = register_script(hass)
+    start_fan(hass)
+    await settle(hass)
+    drop_start_token(hass, "hook-stephen-iphone")
+    drop_start_token(hass, "hook-stephen-ipad")
+    await settle(hass)
+    await press(hass, "job.fan.guest", "stop")
+    assert calls == [{"command": "power", "target_power": "off", "user_id": STEPHEN}]
+    # A tag neither registration shows is refused: neither can start one, so neither is a card device for it.
+    await press(hass, "job.fan.master", "stop")
+    assert len(calls) == 1 and "has no card-capable registration" in caplog.text
 
 
 async def test_a_stop_that_never_takes_effect_pushes_the_real_state_with_a_notice(hass: HomeAssistant, world) -> None:
@@ -850,7 +865,7 @@ async def test_a_card_refused_by_mobile_app_is_logged_and_retried(hass: HomeAssi
     world.service.async_send_message = refuse
     start_fan(hass)
     await settle(hass)
-    assert "Couldn't send job.fan.guest to hook-stephen-ipad: Device not connected" in caplog.text
+    assert "Couldn't send job.fan.guest to hook-stephen-ipad · Fenton: HomeAssistantError" in caplog.text
     assert {s["target"] for s in sent(world)} == {"hook-stephen-iphone"}
 
 
@@ -861,5 +876,5 @@ async def test_a_device_with_no_notify_action_is_warned_about_once_and_retried(h
     await settle(hass)
     hass.states.async_set("input_datetime.guest_bathroom_fan_timer_ends_at", "x", {"timestamp": time.time() + 2400})
     await settle(hass)
-    assert caplog.text.count("No notify action for hook-nameless") == 1
+    assert caplog.text.count("No notify action for hook-nameless · Fenton") == 1
     assert world.live._wake is not None, "a retry is scheduled"
