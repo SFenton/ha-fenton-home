@@ -44,12 +44,17 @@ WARNING_SCORE = 90.0
 
 @dataclass(frozen=True)
 class Registration:
-    """A device that can show cards: a Fenton Home registration with a push-to-start token."""
+    """A device that can be sent cards: a Fenton Home registration that can push.
+
+    ``can_start`` is whether it holds a push-to-start token. Without one the device keeps the cards it already shows
+    (updates and ends still go out) but no new card begins on it.
+    """
 
     webhook_id: str
     user_id: str
     name: str = ""
     person: str | None = None  # the person entity id, when the user is linked to one
+    can_start: bool = True
 
 
 @dataclass
@@ -432,7 +437,7 @@ class Engine:
                 del self.dismissed[key]
         for registration in registrations:
             self._plan_registration(registration, now, plan)
-        # Cards on registrations that are no longer eligible go away.
+        # Cards on registrations that are gone, cannot push, belong to another app or are switched off go away.
         eligible = {r.webhook_id for r in registrations}
         for (webhook_id, tag) in list(self.cards):
             if webhook_id not in eligible:
@@ -459,6 +464,8 @@ class Engine:
                     del self.dismissed[key]
                 else:
                     continue
+            if not registration.can_start and key not in self.cards:
+                continue  # no push-to-start token: only the cards it already shows continue
             candidates.append(Candidate(tag, job.relevance, job.problem is not None, self.first_seen.get(tag, now)))
         visible = [tag for (hook, tag) in self.cards if hook == wh]
         allocation = allocate(candidates, visible)
@@ -486,6 +493,8 @@ class Engine:
                 self._ended((wh, tag), now)
                 card = None
             content = render(job, notice_text)
+            if card is None and not registration.can_start:
+                continue  # a restart on a device that lost its start token ends the card; it returns with the token
             if card is None:
                 plan.actions.append(self._push(wh, tag, job, content, now, first=True))
                 if job.open_ended:

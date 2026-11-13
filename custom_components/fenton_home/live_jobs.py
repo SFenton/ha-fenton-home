@@ -57,7 +57,7 @@ from .model import Control, Expect, JobState, PersonRef
 from .notify import _device_actions, send_to_device
 from .problems import ProblemRecord, build_problem, code_for_raw
 from .snapshot import States
-from .targets import Device, live_devices, people
+from .targets import Device, card_devices, people
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -282,11 +282,11 @@ class LiveJobs:
         if not self.enabled:
             return []
         only = self._options.get(CONF_LIVE_DEVICES) or None
-        return live_devices(self.hass, self.runtime.bundle_id, only)
+        return card_devices(self.hass, self.runtime.bundle_id, only)
 
     def registrations(self) -> list[Registration]:
         by_user = {p.user_id: p.entity_id for p in self._people()}
-        return [Registration(d.webhook_id, d.user_id, d.name, by_user.get(d.user_id)) for d in self._devices()]
+        return [Registration(d.webhook_id, d.user_id, d.name, by_user.get(d.user_id), d.can_start) for d in self._devices()]
 
     # -- the cycle ---------------------------------------------------------------------------------------------------
 
@@ -336,7 +336,7 @@ class LiveJobs:
         if not plan.actions:
             return failed
         actions = _device_actions(self.hass)
-        devices = {d.webhook_id: d for d in live_devices(self.hass, self.runtime.bundle_id)}
+        devices = {d.webhook_id: d for d in card_devices(self.hass, self.runtime.bundle_id)}
         for action in plan.actions:
             device = devices.get(action.webhook_id)
             _log_planned(action)
@@ -407,7 +407,8 @@ class LiveJobs:
             _LOGGER.warning("Ignoring %s %s: the event has no user", tag, control_id)
             _log_press(tag, control_id, None, "refused")
             return
-        regs = [r for r in self.registrations() if r.user_id == user_id]
+        regs = [r for r in self.registrations() if r.user_id == user_id
+                and (r.can_start or (r.webhook_id, tag) in self.engine.cards)]
         if not regs:
             _LOGGER.warning("Ignoring %s %s: user %s has no card-capable registration", tag, control_id, user_id)
             _log_press(tag, control_id, user_id, "refused")
@@ -534,7 +535,8 @@ class LiveJobs:
                                  title=title, message=message)
             title = title or f"{style_for(job_id).title}: {info.problem}"
             message = message or info.message
-        carded = {r.person for r in self.registrations() if r.person}
+        # Only a device that can start a card counts: the others still get the push.
+        carded = {r.person for r in self.registrations() if r.person and r.can_start}
         push_data = dict(data.get("data") or {})
         if record.push_tag:
             push_data.setdefault("tag", record.push_tag)

@@ -349,6 +349,56 @@ def test_a_registration_that_stops_being_eligible_loses_its_cards() -> None:
     assert [(e.webhook_id, e.reason) for e in sc.ends(plan)] == [("hook-stephen-ipad", "not eligible")]
 
 
+# -- A registration without a push-to-start token ----------------------------------------------------------------------
+
+
+def no_start(registration: Registration) -> Registration:
+    """The same registration after an ``update_registration`` that left out ``start_live_activity_token``."""
+    return Registration(registration.webhook_id, registration.user_id, registration.name, registration.person,
+                        can_start=False)
+
+
+def test_a_registration_that_loses_its_start_token_keeps_updating_and_ending_the_cards_it_shows() -> None:
+    engine = Engine()
+    run(engine, sc.fan("guest", ends_in=1500), regs=[sc.PHONE, sc.IPAD])
+    regs = [sc.PHONE, no_start(sc.IPAD)]
+    plan = run(engine, sc.fan("guest", ends_in=1700), 10, regs=regs)
+    assert {p.webhook_id for p in sc.pushes(plan)} == {"hook-stephen-iphone", "hook-stephen-ipad"}
+    assert sc.ends(plan) == []
+    plan = run(engine, sc.states(), 30, regs=regs)
+    assert {(e.webhook_id, e.reason) for e in sc.ends(plan)} == {("hook-stephen-iphone", "gone"),
+                                                                 ("hook-stephen-ipad", "gone")}
+    assert engine.cards == {}
+
+
+def test_a_registration_without_a_start_token_is_not_started_on_a_new_card() -> None:
+    engine = Engine()
+    plan = run(engine, sc.fan("guest"), regs=[sc.PHONE, no_start(sc.IPAD)])
+    assert [p.webhook_id for p in sc.pushes(plan)] == ["hook-stephen-iphone"]
+    assert set(engine.cards) == {("hook-stephen-iphone", "job.fan.guest")}
+    # It begins the card on the next pass once the app hands the token over.
+    plan = run(engine, sc.fan("guest"), 5, regs=[sc.PHONE, sc.IPAD])
+    assert [(p.webhook_id, p.first) for p in sc.pushes(plan)] == [("hook-stephen-ipad", True)]
+
+
+def test_a_card_the_device_cannot_restart_ends_and_waits_for_the_token() -> None:
+    engine = Engine()
+    run(engine, sc.laundry("dryer", on_for=100), regs=[sc.PHONE])
+    plan = run(engine, sc.laundry("dryer", on_for=100), MAX_AGE_SECONDS + 5, regs=[no_start(sc.PHONE)])
+    assert [(type(a), a.reason) for a in plan.actions] == [(End, "restart")]
+    plan = run(engine, sc.laundry("dryer", on_for=100), MAX_AGE_SECONDS + 10, regs=[sc.PHONE])
+    assert [(p.first) for p in sc.pushes(plan)] == [True]
+
+
+def test_only_a_registration_that_is_gone_is_ended_as_not_eligible() -> None:
+    engine = Engine()
+    run(engine, sc.fan("guest"), regs=[sc.PHONE, sc.IPAD])
+    plan = run(engine, sc.fan("guest"), 10, regs=[no_start(sc.PHONE), no_start(sc.IPAD)])
+    assert plan.actions == []
+    plan = run(engine, sc.fan("guest"), 20, regs=[no_start(sc.PHONE)])
+    assert [(e.webhook_id, e.reason) for e in sc.ends(plan)] == [("hook-stephen-ipad", "not eligible")]
+
+
 # -- Dismissals -------------------------------------------------------------------------------------------------------
 
 

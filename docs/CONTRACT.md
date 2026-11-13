@@ -255,6 +255,20 @@ result as follows.
 `job.<id>`: `job.fan.guest`, `job.fan.master`, `job.dishwasher`, `job.dryer`, `job.washer`, `job.vacuum.main_floor`,
 `job.vacuum.music_room`, `job.vacuum.theater_room`, `job.hot_flash`. A device's problem rides on its own tag.
 
+### Which registrations get cards
+
+Updates and ends go to every `mobile_app` registration of this app that can push (cloud push credentials or the
+websocket channel), whether or not it currently holds a push-to-start token. Only **starting** a card needs the token.
+The app replaces `app_data` on every `update_registration`, so for a short time after a launch it can lack
+`start_live_activity_token`; a registration in that state keeps updating and ending the cards the engine already shows
+on it, and starts no new one until the token is back. A card ends as `not eligible` only when its registration is gone,
+can no longer push (signed out: `app_data` cleared), belongs to another app id, or is left out by the "Devices that get
+cards" option.
+
+At the relay, an update for such a registration whose activity token core has not yet stored carries no
+`live_activity_token`: it is dropped with `201` (section 6), so nothing fails and the engine still counts the card as
+shown. A `410` for an update with no start token to restart from is reported as before; the stored token is removed.
+
 ### Attributes (sent on a start)
 
 `{tag, title, kind, symbol, tint}`. `title` is the notification title (the device's name, capped at 32 characters);

@@ -231,6 +231,65 @@ async def test_a_send_that_raises_is_logged_and_sent_again_on_the_next_change(ha
     assert {s["target"] for s in sent(world)} == {"hook-stephen-iphone", "hook-stephen-ipad"}
 
 
+# -- A registration that lost its push-to-start token -------------------------------------------------------------------
+
+
+def mobile_entry(hass: HomeAssistant, webhook_id: str):
+    return next(e for e in hass.config_entries.async_entries("mobile_app") if e.data["webhook_id"] == webhook_id)
+
+
+def set_app_data(hass: HomeAssistant, webhook_id: str, app_data: dict[str, Any]) -> None:
+    entry = mobile_entry(hass, webhook_id)
+    hass.config_entries.async_update_entry(entry, data={**entry.data, "app_data": app_data})
+
+
+def drop_start_token(hass: HomeAssistant, webhook_id: str) -> None:
+    """The app's ``update_registration`` replaced ``app_data`` without ``start_live_activity_token``."""
+    set_app_data(hass, webhook_id, {k: v for k, v in mobile_entry(hass, webhook_id).data["app_data"].items()
+                                    if k != "start_live_activity_token"})
+
+
+async def test_a_registration_that_loses_its_start_token_still_gets_the_update_and_the_end(hass: HomeAssistant,
+                                                                                            world) -> None:
+    start_fan(hass)
+    await settle(hass)
+    count = len(world.service.sent)
+    drop_start_token(hass, "hook-stephen-ipad")
+    await settle(hass)
+    assert sent(world, since=count) == [], "losing the token ends nothing"
+    assert ("hook-stephen-ipad", "job.fan.guest") in world.live.engine.cards
+    hass.states.async_set("input_datetime.guest_bathroom_fan_timer_ends_at", "x", {"timestamp": time.time() + 1800})
+    await settle(hass)
+    assert {s["target"] for s in sent(world, since=count)} == {"hook-stephen-iphone", "hook-stephen-ipad"}
+    count = len(world.service.sent)
+    hass.states.async_set("input_boolean.guest_bathroom_fan_timer_pending", "off")
+    await settle(hass)
+    ends = sent(world, since=count)
+    assert {(s["target"], s["message"]) for s in ends} == {("hook-stephen-iphone", "clear_notification"),
+                                                           ("hook-stephen-ipad", "clear_notification")}
+    assert world.live.engine.cards == {}
+
+
+async def test_a_registration_without_a_start_token_is_not_given_a_new_card(hass: HomeAssistant, world) -> None:
+    drop_start_token(hass, "hook-stephen-ipad")
+    start_fan(hass)
+    await settle(hass)
+    assert {s["target"] for s in sent(world)} == {"hook-stephen-iphone"}
+    set_app_data(hass, "hook-stephen-ipad", dict(LIVE_DATA))
+    await settle(hass)
+    assert {s["target"] for s in sent(world)} == {"hook-stephen-iphone", "hook-stephen-ipad"}
+
+
+async def test_a_card_ends_as_not_eligible_only_when_the_registration_cannot_push_or_is_gone(hass: HomeAssistant,
+                                                                                              world, caplog) -> None:
+    start_fan(hass)
+    await settle(hass)
+    set_app_data(hass, "hook-stephen-ipad", {})  # signed out: nothing can reach it any more
+    await settle(hass)
+    assert "card end tag=job.fan.guest reason=not eligible" in caplog.text
+    assert ("hook-stephen-ipad", "job.fan.guest") not in world.live.engine.cards
+
+
 # -- Buttons ----------------------------------------------------------------------------------------------------------
 
 
