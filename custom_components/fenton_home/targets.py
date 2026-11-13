@@ -27,6 +27,9 @@ class Device:
     user_id: str
     name: str
     model: str
+    #: The app has handed over a push-to-start token, so a new Live Activity can begin on it. A registration
+    #: without one can still update and end the activities it already shows.
+    can_start: bool = True
 
     @property
     def kind(self) -> str:
@@ -63,22 +66,31 @@ def devices(hass: HomeAssistant, bundle_id: str) -> list[Device]:
     return found
 
 
-def live_devices(hass: HomeAssistant, bundle_id: str, only: Collection[str] | None = None) -> list[Device]:
-    """Fenton Home registrations that can show a Live Activity: the app handed over a push-to-start token.
+def card_devices(hass: HomeAssistant, bundle_id: str, only: Collection[str] | None = None) -> list[Device]:
+    """Fenton Home registrations that can be sent a card: they can push, whether or not they can start one.
 
-    ``only`` limits them to those webhook ids (the integration's "which registrations get cards" option).
+    A registration with no push-to-start token (the app is between launches, or the person turned Live Activities
+    off) stays in this list so the cards it already shows keep updating and ending; ``Device.can_start`` says whether a
+    new card may begin on it. ``only`` limits the list to those webhook ids (the integration's "which registrations
+    get cards" option).
     """
     found = []
     for entry in hass.config_entries.async_entries(MOBILE_APP):
         data = entry.data
         app_data = data.get("app_data") or {}
-        if data.get("app_id") != bundle_id or not _can_push(app_data) or not app_data.get("start_live_activity_token"):
+        if data.get("app_id") != bundle_id or not _can_push(app_data):
             continue
         if only and data["webhook_id"] not in only:
             continue
         found.append(Device(webhook_id=data["webhook_id"], user_id=data.get("user_id", ""),
-                            name=data.get("device_name", ""), model=data.get("model", "")))
+                            name=data.get("device_name", ""), model=data.get("model", ""),
+                            can_start=bool(app_data.get("start_live_activity_token"))))
     return found
+
+
+def live_devices(hass: HomeAssistant, bundle_id: str, only: Collection[str] | None = None) -> list[Device]:
+    """The ``card_devices`` that can start a card: the app handed over a push-to-start token."""
+    return [d for d in card_devices(hass, bundle_id, only) if d.can_start]
 
 
 @dataclass(frozen=True)

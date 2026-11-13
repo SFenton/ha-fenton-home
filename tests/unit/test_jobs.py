@@ -225,6 +225,12 @@ def test_each_robot_reads_its_own_entities(robot, entity, segment_sensor) -> Non
     assert entities.ROBOTS[f"vacuum.{robot}"].segment_sensor == segment_sensor
 
 
+def test_only_a_robot_with_no_coordinator_settles_its_room_changes() -> None:
+    assert jobs(sc.manual_run("music_room", flag="segment", segment="Pantry"))["vacuum.music_room"].settle_seconds == 60.0
+    assert jobs(sc.manual_run("main_floor", flag="segment", segment="Hall"))["vacuum.main_floor"].settle_seconds == 0.0
+    assert jobs(sc.main_floor())["vacuum.main_floor"].settle_seconds == 0.0
+
+
 def test_a_paused_manual_run_resumes_with_vacuum_start() -> None:
     paused = jobs(sc.manual_run("music_room", flag="spot", vac="paused"))["vacuum.music_room"]
     assert paused.value is None and paused.controls[0].calls[0].service == "start"

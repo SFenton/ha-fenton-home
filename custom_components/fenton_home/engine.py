@@ -44,12 +44,17 @@ WARNING_SCORE = 90.0
 
 @dataclass(frozen=True)
 class Registration:
-    """A device that can show cards: a Fenton Home registration with a push-to-start token."""
+    """A device that can be sent cards: a Fenton Home registration that can push.
+
+    ``can_start`` is whether it holds a push-to-start token. Without one the device keeps the cards it already shows
+    (updates and ends still go out) but no new card begins on it.
+    """
 
     webhook_id: str
     user_id: str
     name: str = ""
     person: str | None = None  # the person entity id, when the user is linked to one
+    can_start: bool = True
 
 
 @dataclass
@@ -64,6 +69,24 @@ class Card:
     last_progress: float | None = None
     last_progress_push: float = 0.0
     relevance: float = 0.0
+
+
+@dataclass
+class Settle:
+    """What a card with a settling ``session_key`` (a manual vacuum run) carries between refreshes.
+
+    ``identity`` is the session key the card was pushed with, and the one every refresh emits until a new key has held;
+    ``seen`` is the key the sensors read last (the two differ after a refinement within the run's first seconds);
+    ``pending`` is a different key that has not held yet, since ``pending_since``; ``shown`` is the last job accepted.
+    """
+
+    identity: str
+    seen: str
+    since: float
+    shown: JobState
+    settle: float
+    pending: str | None = None
+    pending_since: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -243,6 +266,8 @@ class Engine:
         #: Device -> when its tasked problem first read "issue clear and the device running". Not stored: a restart
         #: starts the confirmation again.
         self._resumed_since: dict[str, float] = {}
+        #: Job id -> the settling state of its card (see ``_settle``).
+        self.settling: dict[str, Settle] = {}
 
     # -- problems ----------------------------------------------------------------------------------------------------
 
@@ -350,7 +375,7 @@ class Engine:
         """Recompute the cards that should exist from a snapshot. Returns them (also kept in ``current``)."""
         ctx = Ctx(tz=ctx.tz, people=ctx.people, memory=self.memory, enabled=ctx.enabled)
         note_hot_flash(self.memory, states)
-        jobs = derive(states, now, ctx)
+        jobs = self._settle_all(derive(states, now, ctx), now)
         self._sync_problems(signals(states, now, ctx), now,
                             frozenset(job.job_id for job in jobs if not job.complete and job.phase == "running"))
 
@@ -398,6 +423,57 @@ class Engine:
         self.current = cards
         return cards
 
+    def _settle_all(self, jobs: list[JobState], now: float) -> list[JobState]:
+        """Hold back a change of room that has not held (``JobState.settle_seconds``); forget runs that are over."""
+        settled = [self._settle(job, now) if job.settle_seconds > 0 and job.session_key else job for job in jobs]
+        live = {job.job_id for job in jobs if job.settle_seconds > 0}
+        for job_id in [j for j in self.settling if j not in live]:
+            del self.settling[job_id]
+        return settled
+
+    def _settle(self, job: JobState, now: float) -> JobState:
+        """The card for a job whose ``session_key`` changes only when the new key has held for ``settle_seconds``.
+
+        A manual vacuum run's key is its status flag and the robot's estimated room. That estimate flips while the robot
+        crosses a doorway, and the flag is set a moment after the robot starts. A real room change ends the card and
+        starts another (spec section 0 decision 5); the rest is the sensors catching up.
+
+        - A key that differs from the one last read, within ``settle_seconds`` of the run's first card (or of the first
+          refresh after a restart, where the card keeps the key it was restored with), is the sensors catching up: the
+          card keeps its identity and updates in place.
+        - Later, a different key must be read, unchanged, for ``settle_seconds``. Until then the card keeps showing the
+          room it had (updating phase and controls in place); a flip back, or on to a third room, starts the wait again.
+        - When it holds, the card takes the new key, which ends the old card and starts the new one.
+        """
+        key = job.session_key
+        state = self.settling.get(job.job_id)
+        if state is None:
+            # A card restored after a restart keeps the key it was pushed with, which the run may have moved on from.
+            restored = next((c.session_key for (_, tag), c in self.cards.items() if tag == job.tag and c.session_key), None)
+            identity = restored or key
+            self.settling[job.job_id] = Settle(identity=identity, seen=identity, since=now, shown=job,
+                                               settle=job.settle_seconds)
+            if identity == key:
+                return job
+            state = self.settling[job.job_id]
+        state.settle = job.settle_seconds
+        if key == state.seen or now - state.since < job.settle_seconds:
+            state.seen, state.pending = key, None
+        else:
+            if state.pending != key:
+                state.pending, state.pending_since = key, now
+            if now - state.pending_since >= job.settle_seconds:
+                state.identity = state.seen = key
+                state.pending = None
+            else:
+                held = state.shown
+                kept = job.with_(session_key=state.identity)
+                if held.phase == job.phase:
+                    kept = kept.with_(headline=held.headline, short=held.short, detail=held.detail)
+                return kept
+        state.shown = job
+        return job.with_(session_key=state.identity)
+
     def _overlay_problems(self, cards: list[JobState], states: States, now: float, tz: tzinfo | None) -> list[JobState]:
         out: list[JobState] = []
         used: set[str] = set()
@@ -432,7 +508,7 @@ class Engine:
                 del self.dismissed[key]
         for registration in registrations:
             self._plan_registration(registration, now, plan)
-        # Cards on registrations that are no longer eligible go away.
+        # Cards on registrations that are gone, cannot push, belong to another app or are switched off go away.
         eligible = {r.webhook_id for r in registrations}
         for (webhook_id, tag) in list(self.cards):
             if webhook_id not in eligible:
@@ -440,6 +516,9 @@ class Engine:
                 self._ended((webhook_id, tag), now)
         for since in self._resumed_since.values():
             plan.wake(max(since + RESUME_CONFIRM_SECONDS - now, 0.0) + 1.0)
+        for state in self.settling.values():
+            if state.pending is not None:
+                plan.wake(state.pending_since + state.settle - now)
         self.urgent_tags -= {action.tag for action in plan.actions if isinstance(action, Push)}
         sent_to = {(a.tag, r.user_id) for a in plan.actions if isinstance(a, Push)
                    for r in registrations if r.webhook_id == a.webhook_id}
@@ -459,6 +538,8 @@ class Engine:
                     del self.dismissed[key]
                 else:
                     continue
+            if not registration.can_start and key not in self.cards:
+                continue  # no push-to-start token: only the cards it already shows continue
             candidates.append(Candidate(tag, job.relevance, job.problem is not None, self.first_seen.get(tag, now)))
         visible = [tag for (hook, tag) in self.cards if hook == wh]
         allocation = allocate(candidates, visible)
@@ -486,6 +567,8 @@ class Engine:
                 self._ended((wh, tag), now)
                 card = None
             content = render(job, notice_text)
+            if card is None and not registration.can_start:
+                continue  # a restart on a device that lost its start token ends the card; it returns with the token
             if card is None:
                 plan.actions.append(self._push(wh, tag, job, content, now, first=True))
                 if job.open_ended:

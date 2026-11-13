@@ -41,6 +41,7 @@ from .entities import (
     DISHWASHER,
     DONETICK_USERS,
     STARTUP_HOLD_SECONDS,
+    TAG_PREFIX,
     FAN_ROOMS,
     LAUNDRY,
     ROBOTS,
@@ -57,7 +58,7 @@ from .model import Control, Expect, JobState, PersonRef
 from .notify import _device_actions, send_to_device
 from .problems import ProblemRecord, build_problem, code_for_raw
 from .snapshot import States
-from .targets import Device, live_devices, people
+from .targets import Device, card_devices, people
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -79,6 +80,8 @@ STORE_VERSION = 1
 LOOKUP_INTERVAL = 2.5
 #: A card that could not be sent is tried again after this long.
 RETRY_SECONDS = 30.0
+#: An orphaned activity whose end has not made core drop its token is ended again after this long.
+ORPHAN_RETRY_SECONDS = 600.0
 
 
 def watched_entities() -> tuple[set[str], tuple[str, ...]]:
@@ -118,6 +121,8 @@ class LiveJobs:
         self._stopped = False
         self._ready = hass.state is CoreState.running
         self._no_action: set[str] = set()
+        #: (webhook id, tag) -> (token, when) of orphan ends sent, so a token that stays does not repeat the end each cycle.
+        self._orphan_ends: dict[tuple[str, str], tuple[str, float]] = {}
 
     # -- options -----------------------------------------------------------------------------------------------------
 
@@ -146,6 +151,8 @@ class LiveJobs:
             self._unsubs.append(async_dispatcher_connect(self.hass, SIGNAL_CONFIG_ENTRY_CHANGED, self._on_entry_changed))
         except ImportError:  # pragma: no cover - renamed upstream; tokens are then picked up on the next change
             _LOGGER.debug("No config entry change signal; new registrations show cards on the next state change")
+        if (stop := recovery.watch_reports(self._on_token_reported)) is not None:
+            self._unsubs.append(stop)
         if self._ready:
             self.engine.hold_until = self.now() + STARTUP_HOLD_SECONDS / 2
         else:
@@ -224,6 +231,12 @@ class LiveJobs:
         if getattr(entry, "domain", None) == "mobile_app":
             self.request()
 
+    @callback
+    def _on_token_reported(self, webhook_id: str, tag: str) -> None:
+        """A phone reported an activity's update token: run a cycle, which ends the activity if the engine doesn't show it."""
+        if tag.startswith(TAG_PREFIX):
+            self.request()
+
     def request(self) -> None:
         """Run a cycle soon (cycles never overlap; a request during one runs another straight after)."""
         if self._stopped:
@@ -282,11 +295,11 @@ class LiveJobs:
         if not self.enabled:
             return []
         only = self._options.get(CONF_LIVE_DEVICES) or None
-        return live_devices(self.hass, self.runtime.bundle_id, only)
+        return card_devices(self.hass, self.runtime.bundle_id, only)
 
     def registrations(self) -> list[Registration]:
         by_user = {p.user_id: p.entity_id for p in self._people()}
-        return [Registration(d.webhook_id, d.user_id, d.name, by_user.get(d.user_id)) for d in self._devices()]
+        return [Registration(d.webhook_id, d.user_id, d.name, by_user.get(d.user_id), d.can_start) for d in self._devices()]
 
     # -- the cycle ---------------------------------------------------------------------------------------------------
 
@@ -297,6 +310,7 @@ class LiveJobs:
         regs = self.registrations()
         self.engine.refresh(states, now, self._ctx())
         plan = self.engine.plan(regs, now)
+        self._end_orphans(plan, now)
         failed = await self._execute(plan, now)
         await self._clear_pushes()
         self._publish()
@@ -330,13 +344,50 @@ class LiveJobs:
             elif record.task_id not in open_ids:
                 record.task_completed = True
 
+    def _end_orphans(self, plan: Plan, now: float) -> None:
+        """End every activity a phone holds a token for that the engine does not show there.
+
+        An end sent before the app had reported the activity's update token never reached the phone, and any other
+        card the engine lost track of is stranded the same way. Core stores a token per registration and tag the
+        moment the phone reports it, so a token for a ``job.*`` tag on a registration with no card in ``engine.cards``
+        is an orphan, and the end (``clear_notification``, which dismisses at once) is added to this cycle's plan.
+
+        Never ends: a card this plan starts or keeps (``engine.cards`` already holds it), one this plan ends anyway,
+        anything while Home Assistant is still starting up (``hold_until``: cards are kept until the other
+        integrations' entities are back, and a restart may have lost what the engine knew), or a tag that is not a
+        job's. A dismissed card is not in ``cards``, so a late token report for it ends it again, harmlessly.
+        """
+        held = recovery.stored_tokens(self.hass)
+        if not held:
+            self._orphan_ends.clear()
+            return
+        if now < self.engine.hold_until:
+            plan.wake(self.engine.hold_until - now)
+            return
+        eligible = {d.webhook_id for d in card_devices(self.hass, self.runtime.bundle_id)}
+        ending = {(a.webhook_id, a.tag) for a in plan.actions if isinstance(a, End)}
+        for key in [k for k, (token, _) in self._orphan_ends.items() if held.get(k[0], {}).get(k[1]) != token]:
+            del self._orphan_ends[key]
+        for webhook_id, tags in held.items():
+            if webhook_id not in eligible:
+                continue
+            for tag, token in tags.items():
+                key = (webhook_id, tag)
+                if not tag.startswith(TAG_PREFIX) or key in self.engine.cards or key in ending:
+                    continue
+                if key in self._orphan_ends and now - self._orphan_ends[key][1] < ORPHAN_RETRY_SECONDS:
+                    continue
+                self._orphan_ends[key] = (token, now)
+                plan.actions.append(End(webhook_id, tag, "orphan"))
+                plan.wake(ORPHAN_RETRY_SECONDS)
+
     async def _execute(self, plan: Plan, now: float) -> bool:
         """Send what the plan asks for. Returns whether any push could not be sent."""
         failed = False
         if not plan.actions:
             return failed
         actions = _device_actions(self.hass)
-        devices = {d.webhook_id: d for d in live_devices(self.hass, self.runtime.bundle_id)}
+        devices = {d.webhook_id: d for d in card_devices(self.hass, self.runtime.bundle_id)}
         for action in plan.actions:
             device = devices.get(action.webhook_id)
             _log_planned(action)
@@ -344,7 +395,8 @@ class LiveJobs:
                 sent = device is not None and await send_to_device(
                     self.hass, device, action.webhook_id, service_data(action), actions)
             except HomeAssistantError as err:
-                _LOGGER.warning("Couldn't send %s to %s: %s", action.tag, action.webhook_id, err)
+                _LOGGER.warning("Couldn't send %s to %s: %s", action.tag, device.name if device else "a device",
+                                type(err).__name__)
                 if isinstance(action, Push):
                     self.engine.push_failed(action.webhook_id, action.tag, now)
                     failed = True
@@ -352,7 +404,8 @@ class LiveJobs:
             if not sent:
                 if action.webhook_id not in self._no_action:
                     self._no_action.add(action.webhook_id)
-                    _LOGGER.warning("No notify action for %s; its %s card isn't sent", action.webhook_id, action.tag)
+                    _LOGGER.warning("No notify action for %s; its %s card isn't sent",
+                                    device.name if device else "a device", action.tag)
                 if isinstance(action, Push):
                     self.engine.push_failed(action.webhook_id, action.tag, now)
                     failed = True
@@ -407,7 +460,8 @@ class LiveJobs:
             _LOGGER.warning("Ignoring %s %s: the event has no user", tag, control_id)
             _log_press(tag, control_id, None, "refused")
             return
-        regs = [r for r in self.registrations() if r.user_id == user_id]
+        regs = [r for r in self.registrations() if r.user_id == user_id
+                and (r.can_start or (r.webhook_id, tag) in self.engine.cards)]
         if not regs:
             _LOGGER.warning("Ignoring %s %s: user %s has no card-capable registration", tag, control_id, user_id)
             _log_press(tag, control_id, user_id, "refused")
@@ -534,7 +588,8 @@ class LiveJobs:
                                  title=title, message=message)
             title = title or f"{style_for(job_id).title}: {info.problem}"
             message = message or info.message
-        carded = {r.person for r in self.registrations() if r.person}
+        # Only a device that can start a card counts: the others still get the push.
+        carded = {r.person for r in self.registrations() if r.person and r.can_start}
         push_data = dict(data.get("data") or {})
         if record.push_tag:
             push_data.setdefault("tag", record.push_tag)

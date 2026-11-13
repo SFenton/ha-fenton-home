@@ -33,6 +33,7 @@ from .entities import (
     REQUESTER_NAMES,
     REQUESTERS,
     ROBOTS,
+    SEGMENT_SETTLE_SECONDS,
     SIDES,
     UNATTRIBUTED,
     VACATION_MODE,
@@ -251,15 +252,15 @@ MAX_SHORT = 10
 
 
 def _running_card(robot: Robot, headline: str, paused: str, short: str, session_key: str, vac: str, states: States, *,
-                  session: bool) -> JobState:
+                  session: bool, settle: float = 0.0) -> JobState:
     """A vacuum card: no time, no ring (owner, 2026-10-17). ``headline`` is the line; ``short`` fits the compact island."""
     if vac == "paused":
         return _card(robot.job, "paused", None, headline=paused, short="Paused",
                      controls=(ctl.vacuum_resume(robot, session), ctl.vacuum_dock(robot, session)),
-                     relevance=55.0, session_key=session_key)
+                     relevance=55.0, session_key=session_key, settle_seconds=settle)
     return _card(robot.job, "running", None, headline=headline, short=short[:MAX_SHORT],
                  controls=(ctl.vacuum_pause(robot, session), ctl.vacuum_dock(robot, session)),
-                 relevance=55.0, session_key=session_key)
+                 relevance=55.0, session_key=session_key, settle_seconds=settle)
 
 
 def _coordinator_room(robot: Robot, room_id: str, vac: str, states: States) -> JobState:
@@ -281,7 +282,9 @@ def _manual_run(robot: Robot, vac: str, states: States) -> JobState:
     else:
         headline, short = f"Cleaning {robot.floor}", "Cleaning"
     paused = f"Paused in {segment}" if segment else "Paused"
-    return _running_card(robot, headline, paused, short, f"{flag}:{segment}", vac, states, session=False)
+    # A robot with a coordinator reports its rooms exactly; only the position estimate of one without needs settling.
+    return _running_card(robot, headline, paused, short, f"{flag}:{segment}", vac, states, session=False,
+                         settle=0.0 if robot.coordinator else SEGMENT_SETTLE_SECONDS)
 
 
 def _issue(robot: Robot, states: States) -> tuple[str, str | None, float | None] | None:

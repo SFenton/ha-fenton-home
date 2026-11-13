@@ -255,6 +255,46 @@ result as follows.
 `job.<id>`: `job.fan.guest`, `job.fan.master`, `job.dishwasher`, `job.dryer`, `job.washer`, `job.vacuum.main_floor`,
 `job.vacuum.music_room`, `job.vacuum.theater_room`, `job.hot_flash`. A device's problem rides on its own tag.
 
+### Which registrations get cards
+
+Updates and ends go to every `mobile_app` registration of this app that can push (cloud push credentials or the
+websocket channel), whether or not it currently holds a push-to-start token. Only **starting** a card needs the token.
+The app replaces `app_data` on every `update_registration`, so for a short time after a launch it can lack
+`start_live_activity_token`; a registration in that state keeps updating and ending the cards the engine already shows
+on it, and starts no new one until the token is back. A card ends as `not eligible` only when its registration is gone,
+can no longer push (signed out: `app_data` cleared), belongs to another app id, or is left out by the "Devices that get
+cards" option.
+
+At the relay, an update for such a registration whose activity token core has not yet stored carries no
+`live_activity_token`: it is dropped with `201` (section 6), so nothing fails and the engine still counts the card as
+shown. A `410` for an update with no start token to restart from is reported as before; the stored token is removed.
+
+### Orphaned activities
+
+When a phone reports a `job.*` activity's update token (the app's `live_activity_token` webhook) for a registration of
+this app on which the engine shows no card with that tag, the engine ends that activity at once (`clear_notification`;
+the end dismisses immediately, section 7 "Content state"). This repairs an end that went out before the app had reported
+the token, which could not reach the phone, and any other activity the engine lost track of.
+
+Core fires no event for the report, so the integration wraps the function core's webhook handler stores it with
+(`mobile_app.live_activity.webhook.store_live_activity_token`; guarded the same way as the dead-token store above) and
+also looks at core's token store on every engine cycle. It never ends: a card the engine shows or has just started
+(`engine.cards` already holds it), an activity whose end the same cycle sends, anything while Home Assistant is starting
+(`hold_until`, which also covers cards recovered after a restart), a tag that is not `job.*` (the aggregate Home
+activity), or a token that has expired. A card the person swiped away is not in `engine.cards` either, so a late token
+report for it ends it again, which is harmless. A token that stays after an end (the end failed) is ended again after
+ten minutes, or at once when the phone reports a new token.
+
+### Vacuum rooms on a robot with no coordinator
+
+A robot with a coordinator reports its rooms exactly: a new room ends the card and starts another at once. A robot with
+none (the music-room robot) has a manual run whose card is keyed by its status flag and its *estimated segment*, a
+position estimate that flips while the robot crosses a doorway. A change of that key ends and restarts the card
+only after the new key has been read unchanged for **60 seconds** (`SEGMENT_SETTLE_SECONDS`); until then the card keeps
+its room and updates in place (pause, resume), and a flip back, or on to a third room, starts the wait again. Within the
+first 60 seconds of a run (or after a restart, from the key the restored card was pushed with) a change of key is the sensors catching up (the status flag is set a few milliseconds after
+the vacuum starts), so it updates the card in place and starts nothing new.
+
 ### Attributes (sent on a start)
 
 `{tag, title, kind, symbol, tint}`. `title` is the notification title (the device's name, capped at 32 characters);

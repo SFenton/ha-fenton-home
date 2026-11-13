@@ -25,6 +25,7 @@ from custom_components.fenton_home.const import (
     DOMAIN,
     SENSOR_JOBS,
 )
+from custom_components.fenton_home.entities import SEGMENT_SETTLE_SECONDS
 from custom_components.fenton_home.live_jobs import LiveJobs
 
 from .test_integration import (
@@ -212,7 +213,7 @@ async def test_a_missing_notify_action_is_logged_and_retried(hass: HomeAssistant
     world.service.unregistered.add("hook-nameless")  # mobile_app has no entry for it
     start_fan(hass)
     await settle(hass)
-    assert "No notify action for hook-nameless" in caplog.text
+    assert "No notify action for hook-nameless · Fenton" in caplog.text
     assert {s["target"] for s in sent(world)} == {"hook-stephen-iphone", "hook-stephen-ipad"}
 
 
@@ -229,6 +230,96 @@ async def test_a_send_that_raises_is_logged_and_sent_again_on_the_next_change(ha
     hass.states.async_set("input_datetime.guest_bathroom_fan_timer_ends_at", "x", {"timestamp": time.time() + 1700})
     await settle(hass)
     assert {s["target"] for s in sent(world)} == {"hook-stephen-iphone", "hook-stephen-ipad"}
+
+
+# -- A registration that lost its push-to-start token -------------------------------------------------------------------
+
+
+def mobile_entry(hass: HomeAssistant, webhook_id: str):
+    return next(e for e in hass.config_entries.async_entries("mobile_app") if e.data["webhook_id"] == webhook_id)
+
+
+def set_app_data(hass: HomeAssistant, webhook_id: str, app_data: dict[str, Any]) -> None:
+    entry = mobile_entry(hass, webhook_id)
+    hass.config_entries.async_update_entry(entry, data={**entry.data, "app_data": app_data})
+
+
+def drop_start_token(hass: HomeAssistant, webhook_id: str) -> None:
+    """The app's ``update_registration`` replaced ``app_data`` without ``start_live_activity_token``."""
+    set_app_data(hass, webhook_id, {k: v for k, v in mobile_entry(hass, webhook_id).data["app_data"].items()
+                                    if k != "start_live_activity_token"})
+
+
+async def test_a_registration_that_loses_its_start_token_still_gets_the_update_and_the_end(hass: HomeAssistant,
+                                                                                            world) -> None:
+    start_fan(hass)
+    await settle(hass)
+    count = len(world.service.sent)
+    drop_start_token(hass, "hook-stephen-ipad")
+    await settle(hass)
+    assert sent(world, since=count) == [], "losing the token ends nothing"
+    assert ("hook-stephen-ipad", "job.fan.guest") in world.live.engine.cards
+    hass.states.async_set("input_datetime.guest_bathroom_fan_timer_ends_at", "x", {"timestamp": time.time() + 1800})
+    await settle(hass)
+    assert {s["target"] for s in sent(world, since=count)} == {"hook-stephen-iphone", "hook-stephen-ipad"}
+    count = len(world.service.sent)
+    hass.states.async_set("input_boolean.guest_bathroom_fan_timer_pending", "off")
+    await settle(hass)
+    ends = sent(world, since=count)
+    assert {(s["target"], s["message"]) for s in ends} == {("hook-stephen-iphone", "clear_notification"),
+                                                           ("hook-stephen-ipad", "clear_notification")}
+    assert world.live.engine.cards == {}
+
+
+async def test_a_registration_without_a_start_token_is_not_given_a_new_card(hass: HomeAssistant, world) -> None:
+    drop_start_token(hass, "hook-stephen-ipad")
+    start_fan(hass)
+    await settle(hass)
+    assert {s["target"] for s in sent(world)} == {"hook-stephen-iphone"}
+    set_app_data(hass, "hook-stephen-ipad", dict(LIVE_DATA))
+    await settle(hass)
+    assert {s["target"] for s in sent(world)} == {"hook-stephen-iphone", "hook-stephen-ipad"}
+
+
+async def test_a_card_ends_as_not_eligible_only_when_the_registration_cannot_push_or_is_gone(hass: HomeAssistant,
+                                                                                              world, caplog) -> None:
+    start_fan(hass)
+    await settle(hass)
+    set_app_data(hass, "hook-stephen-ipad", {})  # signed out: nothing can reach it any more
+    await settle(hass)
+    assert "card end tag=job.fan.guest reason=not eligible" in caplog.text
+    assert ("hook-stephen-ipad", "job.fan.guest") not in world.live.engine.cards
+
+
+# -- A manual vacuum run whose status flag follows the vacuum ----------------------------------------------------------
+
+VACUUM_TAG = "job.vacuum.music_room"
+
+
+def card_pushes(world, webhook: str = "hook-stephen-iphone") -> list[dict[str, Any]]:
+    return [s for s in sent(world, webhook) if s["data"]["tag"] == VACUUM_TAG and s["message"] != "clear_notification"]
+
+
+async def test_a_vacuum_whose_flag_follows_it_by_a_moment_is_one_card_not_a_start_an_end_and_a_start(
+        hass: HomeAssistant, world) -> None:
+    """2026-11-13 03:00:00: the vacuum read ``cleaning`` and 8 ms later its status flag read ``segment``."""
+    segment = "sensor.music_room_music_room_robot_vacuum_estimated_segment"
+    hass.states.async_set(segment, "Music Room")
+    hass.states.async_set("sensor.valetudo_elatedusedram_status_flag", "none")
+    hass.states.async_set("vacuum.valetudo_elatedusedram", "cleaning")
+    await settle(hass)
+    card = world.live.engine.cards[("hook-stephen-iphone", VACUUM_TAG)]
+    assert card_pushes(world)[-1]["data"]["fenton_activity"]["headline"] == "Cleaning Music Room"
+    hass.states.async_set("sensor.valetudo_elatedusedram_status_flag", "segment")
+    await settle(hass)
+    assert card_pushes(world)[-1]["data"]["fenton_activity"]["headline"] == "Vacuuming Music Room"
+    # The robot crosses a doorway for a few seconds and comes back: still the one card.
+    hass.states.async_set(segment, "Pantry")
+    await settle(hass)
+    hass.states.async_set(segment, "Music Room")
+    await settle(hass)
+    assert [s for s in sent(world) if s["message"] == "clear_notification"] == []
+    assert world.live.engine.cards[("hook-stephen-iphone", VACUUM_TAG)] is card and card.session_key == "none:"
 
 
 # -- Buttons ----------------------------------------------------------------------------------------------------------
@@ -248,6 +339,21 @@ async def test_stop_runs_the_script_waits_for_the_state_and_the_card_goes(hass: 
     await press(hass, "job.fan.guest", "stop")
     assert calls == [{"command": "power", "target_power": "off", "user_id": STEPHEN}]
     assert [s["message"] for s in sent(world, since=count)] == ["clear_notification", "clear_notification"]
+
+
+async def test_a_press_from_phones_that_lost_their_start_token_works_for_the_card_they_show(hass: HomeAssistant,
+                                                                                            world, caplog) -> None:
+    calls = register_script(hass)
+    start_fan(hass)
+    await settle(hass)
+    drop_start_token(hass, "hook-stephen-iphone")
+    drop_start_token(hass, "hook-stephen-ipad")
+    await settle(hass)
+    await press(hass, "job.fan.guest", "stop")
+    assert calls == [{"command": "power", "target_power": "off", "user_id": STEPHEN}]
+    # A tag neither registration shows is refused: neither can start one, so neither is a card device for it.
+    await press(hass, "job.fan.master", "stop")
+    assert len(calls) == 1 and "has no card-capable registration" in caplog.text
 
 
 async def test_a_stop_that_never_takes_effect_pushes_the_real_state_with_a_notice(hass: HomeAssistant, world) -> None:
@@ -632,6 +738,42 @@ async def test_cards_and_problems_survive_a_restart(hass: HomeAssistant, world, 
     assert ("hook-stephen-iphone", "job.fan.guest") in ended
 
 
+async def test_a_manual_vacuum_card_survives_a_restart_in_place_and_still_changes_room_when_one_holds(
+        hass: HomeAssistant, world, hass_storage) -> None:
+    """The card keeps the key it was pushed with (``none:``, before the flag read ``segment``); a restart must not
+    read the run's current key as a new room."""
+    segment = "sensor.music_room_music_room_robot_vacuum_estimated_segment"
+    tag, hook = "job.vacuum.music_room", "hook-stephen-iphone"
+    hass.states.async_set(segment, "Music Room")
+    hass.states.async_set("sensor.valetudo_elatedusedram_status_flag", "none")
+    hass.states.async_set("vacuum.valetudo_elatedusedram", "cleaning")
+    await settle(hass)
+    hass.states.async_set("sensor.valetudo_elatedusedram_status_flag", "segment")
+    await settle(hass)
+    assert world.live.engine.cards[(hook, tag)].session_key == "none:"
+    assert await hass.config_entries.async_unload(world.entry.entry_id)
+    assert {c["session_key"] for c in hass_storage["fenton_home.live_jobs"]["data"]["cards"] if c["tag"] == tag} == {"none:"}
+    count = len(world.service.sent)
+    assert await hass.config_entries.async_setup(world.entry.entry_id)
+    await settle(hass)
+    live = hass.data[DOMAIN][world.entry.entry_id].live
+    live.engine.coalescer.window = 0
+    assert [s for s in sent(world, since=count) if s["message"] == "clear_notification"] == []
+    assert live.engine.cards[(hook, tag)].session_key == "none:", "updated in place, not ended and started again"
+    # A new room that holds for the settle time still ends the card and starts another.
+    start = time.time() + 1000
+    live.now = lambda: start
+    hass.states.async_set(segment, "Pantry")
+    await settle(hass)
+    count = len(world.service.sent)
+    live.now = lambda: start + SEGMENT_SETTLE_SECONDS + 1
+    live.request()
+    await settle(hass)
+    messages = [s["message"] for s in sent(world, hook, since=count) if s["data"]["tag"] == tag]
+    assert messages[0] == "clear_notification" and len(messages) == 2
+    assert live.engine.cards[(hook, tag)].session_key == "segment:Pantry"
+
+
 async def test_unload_removes_the_service_and_the_listeners(hass: HomeAssistant, world) -> None:
     assert hass.services.has_service("fenton_home", "problem")
     assert await hass.config_entries.async_unload(world.entry.entry_id)
@@ -760,7 +902,7 @@ async def test_a_card_refused_by_mobile_app_is_logged_and_retried(hass: HomeAssi
     world.service.async_send_message = refuse
     start_fan(hass)
     await settle(hass)
-    assert "Couldn't send job.fan.guest to hook-stephen-ipad: Device not connected" in caplog.text
+    assert "Couldn't send job.fan.guest to hook-stephen-ipad · Fenton: HomeAssistantError" in caplog.text
     assert {s["target"] for s in sent(world)} == {"hook-stephen-iphone"}
 
 
@@ -771,5 +913,5 @@ async def test_a_device_with_no_notify_action_is_warned_about_once_and_retried(h
     await settle(hass)
     hass.states.async_set("input_datetime.guest_bathroom_fan_timer_ends_at", "x", {"timestamp": time.time() + 2400})
     await settle(hass)
-    assert caplog.text.count("No notify action for hook-nameless") == 1
+    assert caplog.text.count("No notify action for hook-nameless · Fenton") == 1
     assert world.live._wake is not None, "a retry is scheduled"

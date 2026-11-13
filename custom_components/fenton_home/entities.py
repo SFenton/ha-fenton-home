@@ -32,6 +32,9 @@ OPEN_ENDED_STALE_SECONDS = 30 * 60
 #: After Home Assistant starts, cards the engine finds no job for are kept this long: other integrations' entities
 #: (Home Connect, the vacuums) are not there yet, and ending every card would only start them again.
 STARTUP_HOLD_SECONDS = 120.0
+#: A manual vacuum run's card changes room only after the sensors have read the new room this long. The robot's "estimated
+#: segment" follows its position, so crossing a doorway flips it for a few seconds.
+SEGMENT_SETTLE_SECONDS = 60.0
 #: Seconds after the engine ends a card during which a "dismissed" report is the app echoing our own end.
 DISMISS_ECHO_SECONDS = 15.0
 #: How long a service-raised problem with no task and no sensor confirmation stays before it is dropped.

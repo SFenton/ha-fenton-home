@@ -74,6 +74,20 @@ async def test_without_a_start_token_the_410_is_reported(hass, configured, hass_
     remove.assert_called_once()
 
 
+async def test_an_update_with_no_activity_token_and_no_start_token_is_dropped_not_failed(
+        hass, configured, hass_client_no_auth) -> None:  # noqa: F811
+    """The app is between launches: core has no update token for the tag and no start token, so it posts the notify
+    without ``live_activity_token``. The relay answers 201 and sends nothing; the engine keeps its card."""
+    client = await hass_client_no_auth()
+    update = update_body()
+    update.pop("live_activity_token")
+    with patch(f"{CLIENT}.send", AsyncMock()) as send, patch(REMOVE, MagicMock(return_value=True)) as remove:
+        response = await post(client, update)
+    assert response.status == HTTPStatus.CREATED and send.await_count == 0
+    remove.assert_not_called()
+    assert (await response.json())["rateLimits"]["successful"] == 0
+
+
 async def test_a_retry_that_fails_too_is_reported(hass, device, hass_client_no_auth, caplog) -> None:
     client = await hass_client_no_auth()
     with patch(f"{CLIENT}.send", AsyncMock(side_effect=APNsError(410, "Unregistered"))) as send, \

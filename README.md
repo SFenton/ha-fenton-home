@@ -71,7 +71,7 @@ Button handlers keep working: the app fires `mobile_app_notification_action` thr
 
 With Live Activities allowed, the app hands Home Assistant a push-to-start token and this integration's job engine
 (`live_jobs.py`) shows each running household job as its own Live Activity, kept current while the app is closed: the
-bathroom fans, the dishwasher, the washer and dryer, the vacuums (one card per room, or per manual run) and a hot flash.
+bathroom fans, the dishwasher, the washer and dryer, the vacuums (one card per room, or per manual run; a robot with no coordinator changes room only once the new room has held for a minute) and a hot flash.
 Cards go to every person with the app, ordered by relevance (the Dynamic Island shows the most relevant), with up to
 four jobs and one problem on a device at a time. A card's Stop, Pause, Resume and Dock buttons run the matching Home
 Assistant action; the card ends once the device confirms. A job that finishes by itself shows **Complete** for five
@@ -116,7 +116,7 @@ no payload body and no webhook id; older warnings elsewhere may still name a dev
 
 - **Send critical alerts.** Leave off until Apple grants the app the Critical Alerts entitlement. While it is off, `critical` notifications arrive as time-sensitive with the default sound.
 - **Push address base URL.** Where Home Assistant can reach itself (for example `http://127.0.0.1:8123`). Empty uses the internal URL.
-- **Show job cards**, **Jobs that get a card**, **Devices that get cards.** The master switch for Live Activity cards, which jobs run, and which devices (empty: every device with Live Activities allowed) get them. With the switch off, problems go to everyone as ordinary notifications.
+- **Show job cards**, **Jobs that get a card**, **Devices that get cards.** The master switch for Live Activity cards, which jobs run, and which devices (empty: every device that can receive pushes) get them. A device that has lost its push-to-start token for a moment keeps updating and ending the cards it shows; it just starts no new one. With the switch off, problems go to everyone as ordinary notifications.
 - **Sweep abandoned registrations.** `off`, `dry_run` (default: list candidates, remove nothing) or `on`; see Device lifecycle.
 - **Presence auto-enrolment**, **Presence dry run**, **Trackers kept out of presence.** See Presence.
 - **Notify action for people without the app.** The action that reaches a person's whole phone, with `*` for their first name; the default `*_s_phone` is `notify.stephen_s_phone`.
